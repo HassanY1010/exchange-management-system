@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: exchange-platform-app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://exchange_user:exchange_password_2026@postgres:5432/exchange_db?schema=public
+      - JWT_SECRET=production-super-secret-jwt-key-2026-exchange
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - uploads_data:/app/uploads
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: exchange-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: exchange_user
+      POSTGRES_PASSWORD: exchange_password_2026
+      POSTGRES_DB: exchange_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exchange_user -d exchange_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: exchange-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads_data:

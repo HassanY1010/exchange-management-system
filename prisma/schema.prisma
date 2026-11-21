@@ -1,0 +1,432 @@
+// Prisma Schema for Exchange & Financial Management System
+// Platform Specification: Sections 32 & 33 & Strict Decimal Precision
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  phone        String?
+  passwordHash String
+  roleId       String
+  role         Role      @relation(fields: [roleId], references: [id])
+  status       String    @default("active") // active, inactive, suspended
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee Employee?
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique // admin, accountant, custody_officer, data_entry
+  description String?
+  users       User[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  key         String           @unique
+  name        String
+  description String?
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model Customer {
+  id             String                @id @default(uuid())
+  customerCode   String                @unique
+  name           String
+  phone          String
+  secondaryPhone String?
+  whatsapp       String?
+  identityNumber String?
+  address        String?
+  city           String?
+  notes          String?
+  status         String                @default("active") // active, inactive, blocked
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  sessions       CustomerSession[]
+  transactions   ExchangeTransaction[]
+  receipts       BankakReceipt[]
+}
+
+model CustomerSession {
+  id              String                @id @default(uuid())
+  customerId      String
+  customer        Customer              @relation(fields: [customerId], references: [id])
+  businessDate    String                // YYYY-MM-DD
+  sessionNumber   String                @unique
+  status          String                @default("open") // open, pending_receipts, pending_delivery, completed, has_balance, needs_review, cancelled
+  exchangeRate    Decimal               @db.Decimal(20, 4)
+  currencyFrom    String                @default("SDG")
+  currencyTo      String                @default("EGP")
+  requestedAmount Decimal               @db.Decimal(20, 4) // target amount in EGP (e.g. 100,000)
+  expectedAmount  Decimal               @db.Decimal(20, 4) // required amount in SDG (e.g. 20,000,000)
+  receivedAmount  Decimal               @default(0) @db.Decimal(20, 4) // total approved receipts in SDG
+  deliveredAmount Decimal               @default(0) @db.Decimal(20, 4) // delivered to customer in EGP
+  remainingAmount Decimal               @default(0) @db.Decimal(20, 4) // remaining SDG to receive
+  createdBy       String
+  closedBy        String?
+  closedAt        DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  receipts        BankakReceipt[]
+  transactions    ExchangeTransaction[]
+}
+
+model ExchangeTransaction {
+  id                   String           @id @default(uuid())
+  transactionNumber    String           @unique
+  customerId           String
+  customer             Customer         @relation(fields: [customerId], references: [id])
+  customerSessionId    String?
+  customerSession      CustomerSession? @relation(fields: [customerSessionId], references: [id])
+  transactionType      String           // SDG_TO_EGP, EGP_TO_SDG, BUY_CURRENCY, SELL_CURRENCY, SETTLEMENT, REFUND, PARTIAL
+  fromCurrency         String
+  toCurrency           String
+  fromAmount           Decimal          @db.Decimal(20, 4)
+  toAmount             Decimal          @db.Decimal(20, 4)
+  exchangeRate         Decimal          @db.Decimal(20, 4)
+  feeAmount            Decimal          @default(0) @db.Decimal(20, 4)
+  status               String           @default("pending") // pending, approved, cancelled, reversed
+  sourceAccountId      String?
+  destinationAccountId String?
+  employeeId           String?
+  createdBy            String
+  approvedBy           String?
+  approvedAt           DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  receipts             BankakReceipt[]
+}
+
+model BankakReceipt {
+  id                    String               @id @default(uuid())
+  receiptNumber         String               @unique
+  transactionId         String               // Bankak unique transaction ID
+  customerId            String?
+  customer              Customer?            @relation(fields: [customerId], references: [id])
+  customerSessionId     String?
+  customerSession       CustomerSession?     @relation(fields: [customerSessionId], references: [id])
+  exchangeTransactionId String?
+  exchangeTransaction   ExchangeTransaction? @relation(fields: [exchangeTransactionId], references: [id])
+  senderName            String?
+  senderAccount         String?
+  receiverName          String?
+  receiverAccount       String?
+  amount                Decimal              @db.Decimal(20, 4)
+  currency              String               @default("SDG")
+  transactionDate       String?              // YYYY-MM-DD
+  transactionTime       String?              // HH:mm:ss
+  bankName              String               @default("بنكك - بنك الخرطوم")
+  ocrText               String?
+  ocrConfidence         Float                @default(0)
+  imageStorageKey       String
+  imageHash             String               // SHA-256 for duplicate detection
+  status                String               @default("uploaded") // uploaded, processing, ocr_completed, pending_review, verified, approved, duplicate, rejected, failed
+  duplicateOfId         String?
+  reviewedBy            String?
+  approvedBy            String?
+  approvedAt            DateTime?
+  createdBy             String
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+}
+
+model Account {
+  id              String        @id @default(uuid())
+  accountCode     String        @unique
+  name            String
+  accountType     String        // cash_safe, bank, bankak, employee_custody, supplier_liability, customer_liability, capital, expense, profit_loss
+  currency        String        // EGP, SDG, USD, SAR, AED
+  parentAccountId String?
+  openingBalance  Decimal       @default(0) @db.Decimal(20, 4)
+  currentBalance  Decimal       @default(0) @db.Decimal(20, 4)
+  status          String        @default("active") // active, inactive, locked
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  ledgerLines     LedgerLine[]
+}
+
+model LedgerEntry {
+  id            String       @id @default(uuid())
+  entryNumber   String       @unique
+  entryType     String       // exchange, custody_delivery, custody_settlement, supplier_purchase, supplier_sale, capital_injection, capital_withdrawal, expense, debt_payment, daily_closing, reversal
+  referenceType String?      // CustomerSession, ExchangeTransaction, BankakReceipt, EmployeeCustody, SupplierTransaction, Expense, DebtPayment, DailyClosing
+  referenceId   String?
+  entryDate     String       // YYYY-MM-DD
+  description   String
+  status        String       @default("posted") // draft, pending_approval, posted, reversed
+  createdBy     String
+  approvedBy    String?
+  createdAt     DateTime     @default(now())
+
+  lines         LedgerLine[]
+}
+
+model LedgerLine {
+  id            String      @id @default(uuid())
+  ledgerEntryId String
+  ledgerEntry   LedgerEntry @relation(fields: [ledgerEntryId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       Account     @relation(fields: [accountId], references: [id])
+  currency      String
+  debit         Decimal     @default(0) @db.Decimal(20, 4)
+  credit        Decimal     @default(0) @db.Decimal(20, 4)
+  description   String?
+  createdAt     DateTime    @default(now())
+}
+
+model Employee {
+  id             String            @id @default(uuid())
+  employeeCode   String            @unique
+  name           String
+  phone          String
+  identityNumber String?
+  jobTitle       String?
+  status         String            @default("active")
+  userId         String?           @unique
+  user           User?             @relation(fields: [userId], references: [id])
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  custodies      EmployeeCustody[]
+}
+
+model EmployeeCustody {
+  id            String               @id @default(uuid())
+  employeeId    String
+  employee      Employee             @relation(fields: [employeeId], references: [id])
+  accountId     String               // linked custody account
+  currency      String               @default("EGP")
+  openingAmount Decimal              @db.Decimal(20, 4)
+  currentAmount Decimal              @db.Decimal(20, 4)
+  businessDate  String               // YYYY-MM-DD
+  status        String               @default("open") // open, partially_settled, settled, closed
+  issuedBy      String
+  approvedBy    String?
+  issuedAt      DateTime             @default(now())
+  closedAt      DateTime?
+  createdAt     DateTime             @default(now())
+
+  transactions  CustodyTransaction[]
+}
+
+model CustodyTransaction {
+  id                    String          @id @default(uuid())
+  custodyId             String
+  custody               EmployeeCustody @relation(fields: [custodyId], references: [id], onDelete: Cascade)
+  transactionType       String          // delivery_to_customer, received_from_employee, safe_refill, return_to_safe, expense_payout, adjustment
+  amount                Decimal         @db.Decimal(20, 4)
+  currency              String          @default("EGP")
+  customerId            String?
+  exchangeTransactionId String?
+  accountId             String?
+  referenceNumber       String?
+  description           String
+  createdBy             String
+  approvedBy            String?
+  createdAt             DateTime        @default(now())
+}
+
+model Supplier {
+  id           String                @id @default(uuid())
+  supplierCode String                @unique
+  name         String
+  phone        String
+  whatsapp     String?
+  address      String?
+  notes        String?
+  status       String                @default("active")
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  transactions SupplierTransaction[]
+}
+
+model SupplierTransaction {
+  id                String    @id @default(uuid())
+  transactionNumber String    @unique
+  supplierId        String
+  supplier          Supplier  @relation(fields: [supplierId], references: [id])
+  transactionType   String    // BUY_SDG_PAY_EGP, SELL_SDG_GET_EGP, BUY_EGP_PAY_SDG, SELL_EGP_GET_SDG, PARTIAL_SETTLEMENT, DEBT_PAYMENT
+  fromCurrency      String
+  toCurrency        String
+  fromAmount        Decimal   @db.Decimal(20, 4)
+  toAmount          Decimal   @db.Decimal(20, 4)
+  exchangeRate      Decimal   @db.Decimal(20, 4)
+  feeAmount         Decimal   @default(0) @db.Decimal(20, 4)
+  status            String    @default("completed") // pending, partially_settled, completed, reversed
+  createdBy         String
+  approvedBy        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model ExpenseCategory {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  status      String    @default("active")
+
+  expenses    Expense[]
+}
+
+model Expense {
+  id                String          @id @default(uuid())
+  expenseNumber     String          @unique
+  categoryId        String
+  category          ExpenseCategory @relation(fields: [categoryId], references: [id])
+  accountId         String
+  amount            Decimal         @db.Decimal(20, 4)
+  currency          String          @default("EGP")
+  expenseDate       String          // YYYY-MM-DD
+  description       String
+  receiptStorageKey String?
+  status            String          @default("approved") // pending, approved, cancelled
+  createdBy         String
+  approvedBy        String?
+  createdAt         DateTime        @default(now())
+}
+
+model Debt {
+  id              String        @id @default(uuid())
+  debtNumber      String        @unique
+  debtorType      String        // customer, supplier, employee, office
+  debtorId        String
+  creditorType    String        // office, customer, supplier, employee
+  creditorId      String
+  currency        String
+  originalAmount  Decimal       @db.Decimal(20, 4)
+  remainingAmount Decimal       @db.Decimal(20, 4)
+  debtDate        String        // YYYY-MM-DD
+  dueDate         String?
+  description     String
+  status          String        @default("outstanding") // outstanding, partially_paid, paid, overdue, written_off
+  createdBy       String
+  createdAt       DateTime      @default(now())
+
+  payments        DebtPayment[]
+}
+
+model DebtPayment {
+  id          String   @id @default(uuid())
+  debtId      String
+  debt        Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  amount      Decimal  @db.Decimal(20, 4)
+  currency    String
+  accountId   String
+  paymentDate String   // YYYY-MM-DD
+  reference   String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+}
+
+model CapitalTransaction {
+  id              String   @id @default(uuid())
+  transactionType String   // initial_capital, addition, withdrawal, personal_draw
+  accountId       String
+  currency        String
+  amount          Decimal  @db.Decimal(20, 4)
+  transactionDate String   // YYYY-MM-DD
+  description     String
+  createdBy       String
+  createdAt       DateTime @default(now())
+}
+
+model ExchangeRate {
+  id            String    @id @default(uuid())
+  fromCurrency  String
+  toCurrency    String
+  rateType      String    // customer, supplier, market_benchmark
+  rate          Decimal   @db.Decimal(20, 4)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+}
+
+model DailyClosing {
+  id               String    @id @default(uuid())
+  businessDate     String    @unique // YYYY-MM-DD
+  status           String    @default("open") // open, closed, reopened
+  openingBalances  String    // JSON stringified snapshot
+  expectedBalances String    // JSON stringified snapshot
+  actualBalances   String    // JSON stringified user counted input
+  differences      String    // JSON stringified variance
+  notes            String?
+  closedBy         String?
+  closedAt         DateTime?
+  reopenedBy       String?
+  reopenedAt       DateTime?
+  createdAt        DateTime  @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String   // CREATE, UPDATE, DELETE, APPROVE, REJECT, CLOSE, REOPEN, LOGIN, LOGIN_FAILED
+  entityType String   // Customer, Session, Transaction, Receipt, Account, Custody, Supplier, Expense, Debt, DailyClosing
+  entityId   String?
+  oldValues  String?  // JSON string
+  newValues  String?  // JSON string
+  reason     String?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+}
+
+model Notification {
+  id            String   @id @default(uuid())
+  userId        String?
+  type          String   // duplicate_receipt, pending_review, session_unbalanced, custody_alert, closing_difference, rate_change
+  title         String
+  message       String
+  referenceType String?
+  referenceId   String?
+  isRead        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+}
+
+model FileRecord {
+  id               String   @id @default(uuid())
+  storageKey       String   @unique
+  originalFilename String
+  mimeType         String
+  size             Int
+  checksum         String
+  uploadedBy       String?
+  createdAt        DateTime @default(now())
+}
+
+model Setting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
