@@ -263,6 +263,31 @@ async function runEndToEndTests() {
     },
   });
 
+  // ترحيل قيد تسليم العهدة من الخزينة إلى حساب العهدة
+  await postLedgerTransaction({
+    entryType: 'custody_issuance',
+    referenceType: 'EmployeeCustody',
+    referenceId: custody.id,
+    description: `تسليم عهدة نقدية للموظف ${employee.name} بمبلغ 500,000 EGP`,
+    createdBy: 'المدير المالي',
+    lines: [
+      {
+        accountId: custodyAccount.id,
+        currency: 'EGP',
+        debit: 500000,
+        credit: 0,
+        description: `استلام عهدة نقدية`,
+      },
+      {
+        accountId: egpSafeAccount.id,
+        currency: 'EGP',
+        debit: 0,
+        credit: 500000,
+        description: `صرف عهدة للموظف ${employee.name}`,
+      },
+    ],
+  });
+
   console.log(`1. تم تسليم عهدة للموظف ${employee.name} (معرف: ${custody.id.substring(0, 8)})`);
   console.log(`   - تاريخ العهدة: ${custody.businessDate}`);
   console.log(`   - مبلغ العهدة المسلم: ${Number(custody.openingAmount).toLocaleString()} EGP`);

@@ -43,6 +43,8 @@ export default function ReceiptsPage() {
   const [editSender, setEditSender] = useState('');
   const [editReceiver, setEditReceiver] = useState('');
   const [editDate, setEditDate] = useState('');
+  const [verifySource, setVerifySource] = useState('mobile_app');
+  const [verifyNotes, setVerifyNotes] = useState('');
   const [processingAction, setProcessingAction] = useState(false);
 
   const fetchReceipts = () => {
@@ -127,13 +129,43 @@ export default function ReceiptsPage() {
     setEditDate(rcp.transactionDate || '');
   };
 
-  // Approve Receipt
+  // Verify Receipt (Step 1)
+  const handleVerify = async () => {
+    if (!reviewReceipt) return;
+    setProcessingAction(true);
+    try {
+      const res = await fetch(`/api/v1/receipts/${reviewReceipt.id}/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verificationSource: verifySource,
+          verificationNotes: verifyNotes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'فشل التحقق من الإيصال');
+      }
+      setReviewReceipt(data.data);
+      fetchReceipts();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setProcessingAction(false);
+    }
+  };
+
+  // Approve Receipt & Post Ledger (Step 2)
   const handleApprove = async () => {
     if (!reviewReceipt) return;
     setProcessingAction(true);
     try {
       const res = await fetch(`/api/v1/receipts/${reviewReceipt.id}/approve`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          directVerification: true,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -151,15 +183,15 @@ export default function ReceiptsPage() {
   // Reject Receipt
   const handleReject = async () => {
     if (!reviewReceipt) return;
-    const reason = prompt('سبب رفض الإيصال:', 'بيانات غير مطابقة أو إشعار غير صالح');
-    if (!reason) return;
+    const reason = prompt('سبب رفض الإيصال (إلزامي للتوثيق والرقابة):', 'بيانات غير مطابقة أو إشعار غير صالح');
+    if (!reason || !reason.trim()) return;
 
     setProcessingAction(true);
     try {
       const res = await fetch(`/api/v1/receipts/${reviewReceipt.id}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify({ reason: reason.trim() }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -180,7 +212,21 @@ export default function ReceiptsPage() {
         return (
           <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
             <CheckCircle className="w-3 h-3 text-emerald-600" />
-            <span>معتمد</span>
+            <span>معتمد مالياً</span>
+          </span>
+        );
+      case 'verified':
+        return (
+          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800">
+            <CheckCircle className="w-3 h-3 text-blue-600" />
+            <span>تم التحقق بنكياً</span>
+          </span>
+        );
+      case 'suspicious':
+        return (
+          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 animate-pulse">
+            <AlertTriangle className="w-3 h-3 text-amber-600" />
+            <span>مشتبه به!</span>
           </span>
         );
       case 'duplicate':
@@ -190,10 +236,11 @@ export default function ReceiptsPage() {
             <span>إيصال مكرر!</span>
           </span>
         );
+      case 'pending_verification':
       case 'pending_review':
         return (
-          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
-            <span>بانتظار المراجعة</span>
+          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
+            <span>بانتظار التحقق</span>
           </span>
         );
       case 'rejected':
@@ -659,6 +706,49 @@ export default function ReceiptsPage() {
                     </div>
                   </div>
 
+                  {/* Verification Section */}
+                  <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-blue-900">التحقق من وصول الأموال بنكياً:</span>
+                      {reviewReceipt.verifiedBy ? (
+                        <span className="text-[11px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-full">
+                          تم التحقق بواسطة {reviewReceipt.verifiedBy} ({reviewReceipt.verificationSource || 'تطبيق بنكك'})
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded-full">
+                          بانتظار التحقق من كشف الحساب/التطبيق
+                        </span>
+                      )}
+                    </div>
+
+                    {!reviewReceipt.verifiedBy && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        <div>
+                          <label className="block text-[10px] text-slate-500 mb-0.5">مصدر التحقق</label>
+                          <select
+                            value={verifySource}
+                            onChange={(e) => setVerifySource(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300"
+                          >
+                            <option value="mobile_app">تطبيق بنكك (الهاتف)</option>
+                            <option value="bank_statement">كشف حساب بنك الخرطوم</option>
+                            <option value="teller_confirmation">إشعار صراف معتمد</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-500 mb-0.5">ملاحظات التحقق</label>
+                          <input
+                            type="text"
+                            value={verifyNotes}
+                            onChange={(e) => setVerifyNotes(e.target.value)}
+                            placeholder="مثال: مطابقة الرصيد اللحظي"
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Actions */}
                   <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
                     <button
@@ -668,20 +758,30 @@ export default function ReceiptsPage() {
                     >
                       رفض الإيصال
                     </button>
-                    <div className="flex items-center space-x-2 space-x-reverse">
+                    <div className="flex items-center space-x-2 space-x-reverse flex-wrap gap-2">
+                      {!reviewReceipt.verifiedBy && reviewReceipt.status !== 'approved' && reviewReceipt.status !== 'duplicate' && (
+                        <button
+                          type="button"
+                          onClick={handleVerify}
+                          disabled={processingAction}
+                          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-40 min-h-[44px]"
+                        >
+                          تأكيد التحقق البنكي (Verify)
+                        </button>
+                      )}
                       <button
                         onClick={() => setReviewReceipt(null)}
-                        className="flex-1 sm:flex-none px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 min-h-[44px]"
+                        className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 min-h-[44px]"
                       >
                         إلغاء
                       </button>
                       <button
                         onClick={handleApprove}
                         disabled={processingAction || reviewReceipt.status === 'approved' || reviewReceipt.status === 'duplicate'}
-                        className="flex-1 sm:flex-none px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse disabled:opacity-40 min-h-[44px]"
+                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse disabled:opacity-40 min-h-[44px]"
                       >
                         <Check className="w-4 h-4 shrink-0" />
-                        <span>اعتماد الإيصال وقيد مالي</span>
+                        <span>الاعتماد المالي وقيد اليومية</span>
                       </button>
                     </div>
                   </div>

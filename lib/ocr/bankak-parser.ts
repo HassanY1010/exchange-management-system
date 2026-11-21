@@ -203,3 +203,99 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
     extractedFieldsCount: fieldsMatched,
   };
 }
+
+export interface ReceiptRiskAssessment {
+  isDuplicate: boolean;
+  isSuspicious: boolean;
+  status: 'pending_verification' | 'duplicate' | 'suspicious';
+  reason?: string;
+  matchedReceiptId?: string;
+}
+
+/**
+ * Multi-attribute anti-fraud and duplication engine:
+ * Tier 1 (Confirmed Duplicate): Exact Transaction ID or Exact Image Hash (SHA-256)
+ * Tier 2 (Suspicious Receipt): Same Amount + Same Date + Matching Sender Name
+ */
+export function evaluateReceiptRisk(
+  newReceipt: {
+    transactionId: string;
+    imageHash: string;
+    amount: number;
+    transactionDate?: string;
+    senderName?: string;
+  },
+  existingReceipts: Array<{
+    id: string;
+    transactionId: string;
+    imageHash: string;
+    amount: any;
+    transactionDate?: string | null;
+    senderName?: string | null;
+    status: string;
+  }>
+): ReceiptRiskAssessment {
+  // 1. Exact Duplicate Check (Transaction ID or Image Hash)
+  for (const existing of existingReceipts) {
+    if (
+      existing.transactionId &&
+      newReceipt.transactionId &&
+      existing.transactionId.trim().toLowerCase() === newReceipt.transactionId.trim().toLowerCase()
+    ) {
+      return {
+        isDuplicate: true,
+        isSuspicious: false,
+        status: 'duplicate',
+        reason: `تطابق قطعي: رقم العملية (${newReceipt.transactionId}) مسجل مسبقاً في النظام بالإيصال رقم ${existing.id.substring(0, 8)}`,
+        matchedReceiptId: existing.id,
+      };
+    }
+    if (
+      existing.imageHash &&
+      newReceipt.imageHash &&
+      existing.imageHash === newReceipt.imageHash &&
+      !existing.imageHash.startsWith('synthetic')
+    ) {
+      return {
+        isDuplicate: true,
+        isSuspicious: false,
+        status: 'duplicate',
+        reason: `تطابق قطعي: بصمة الصورة الرقمية (SHA-256) مطابقة تماماً لإيصال مسجل مسبقاً`,
+        matchedReceiptId: existing.id,
+      };
+    }
+  }
+
+  // 2. Suspicious Heuristic Match (Same amount, same date, similar sender name)
+  for (const existing of existingReceipts) {
+    if (existing.status === 'rejected' || existing.status === 'duplicate') continue;
+    const sameAmount = Math.abs(Number(existing.amount) - Number(newReceipt.amount)) < 0.01;
+    const sameDate =
+      existing.transactionDate &&
+      newReceipt.transactionDate &&
+      existing.transactionDate === newReceipt.transactionDate;
+    
+    const senderA = (existing.senderName || '').trim();
+    const senderB = (newReceipt.senderName || '').trim();
+    const senderSimilar =
+      senderA.length > 3 &&
+      senderB.length > 3 &&
+      (senderA.includes(senderB) || senderB.includes(senderA));
+
+    if (sameAmount && sameDate && senderSimilar) {
+      return {
+        isDuplicate: false,
+        isSuspicious: true,
+        status: 'suspicious',
+        reason: `اشتباه تكرار: المبلغ (${newReceipt.amount.toLocaleString()} SDG) والتاريخ (${newReceipt.transactionDate}) واسم المرسل يتطابق مع إيصال مسجل برقم ${existing.transactionId}`,
+        matchedReceiptId: existing.id,
+      };
+    }
+  }
+
+  return {
+    isDuplicate: false,
+    isSuspicious: false,
+    status: 'pending_verification',
+  };
+}

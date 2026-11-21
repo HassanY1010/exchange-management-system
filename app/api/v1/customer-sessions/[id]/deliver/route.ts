@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
+import { createNotification } from '@/lib/notifications/notification-service';
 import Decimal from 'decimal.js';
 
 export async function POST(
@@ -12,7 +13,71 @@ export async function POST(
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  if (!['admin', 'accountant', 'custody_officer'].includes(user.role)) {
+    return NextResponse.json({ error: 'صلاحية صرف النقدية مقتصرة على أمين الصندوق، موظف العهدة، المحاسب أو المدير' }, { status: 403 });
+  }
+
   try {
+    const body = await req.json().catch(() => ({}));
+    const {
+      accountId,
+      employeeId,
+      notes,
+      recipientName,
+      allowPartial = false,
+      idempotencyKey,
+    } = body;
+
+    // 1. Concurrency Lock & Idempotency Check on CustomerSession
+    const sessionData = await prisma.$transaction(async (tx) => {
+      const lockedSessionRows = await tx.$queryRawUnsafe<any[]>(
+        'SELECT id, "status", "requestedAmount", "expectedAmount", "receivedAmount", "deliveredAmount", "exchangeRate", "customerId", "sessionNumber", "payoutIdempotencyKey" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+        params.id
+      );
+
+      if (!lockedSessionRows || lockedSessionRows.length === 0) {
+        throw new Error('الجلسة الحسابية غير موجودة');
+      }
+
+      const locked = lockedSessionRows[0];
+
+      // Idempotency: If request with same idempotencyKey was already fulfilled, return existing state
+      if (idempotencyKey && locked.payoutIdempotencyKey === idempotencyKey && locked.status === 'completed') {
+        const existingVoucher = await tx.cashPayoutVoucher.findFirst({
+          where: { customerSessionId: locked.id },
+        });
+        return { isIdempotentReplay: true, session: locked, voucher: existingVoucher };
+      }
+
+      if (locked.status === 'completed') {
+        throw new Error('تم صرف وتسليم هذه الجلسة مسبقاً بالكامل، ولا يمكن تكرار الصرف');
+      }
+
+      if (locked.status === 'cancelled') {
+        throw new Error('لا يمكن صرف نقدية لجلسة ملغاة');
+      }
+
+      const received = new Decimal(locked.receivedAmount.toString());
+      const expected = new Decimal(locked.expectedAmount.toString());
+
+      // Validate receipt satisfaction (Strict zero-unverified payout protection)
+      if (received.lessThan(expected) && !allowPartial) {
+        throw new Error(
+          `لا يمكن صرف النقدية للعميل قبل استيفاء واعتماد كامل إيصالات بنكك المطلوبة. المعتمد حالياً: ${received.toFixed(2)} SDG، والمطلوب: ${expected.toFixed(2)} SDG`
+        );
+      }
+
+      return { isIdempotentReplay: false, session: locked };
+    });
+
+    if (sessionData.isIdempotentReplay) {
+      return NextResponse.json({
+        success: true,
+        message: 'تم استرجاع إيصال الصرف المنفذ مسبقاً (Idempotent Request)',
+        data: { session: sessionData.session, voucher: sessionData.voucher },
+      });
+    }
+
     const session = await prisma.customerSession.findUnique({
       where: { id: params.id },
       include: { customer: true },
@@ -22,21 +87,15 @@ export async function POST(
       return NextResponse.json({ error: 'الجلسة غير موجودة' }, { status: 404 });
     }
 
-    if (session.status === 'completed' || session.status === 'cancelled') {
-      return NextResponse.json({ error: 'لا يمكن تسليم مبالغ لجلسة مغلقة أو ملغاة' }, { status: 400 });
-    }
-
-    const body = await req.json().catch(() => ({}));
     const amountEgp = Number(body.amountEgp || session.requestedAmount);
-
     if (amountEgp <= 0) {
       return NextResponse.json({ error: 'المبلغ المسلم يجب أن يكون أكبر من الصفر' }, { status: 400 });
     }
 
-    // Determine cash delivery account (safe 1010 or custody 1050)
+    // Determine cash delivery source account (safe 1010 or specific custody)
     let sourceAccount = null;
-    if (body.accountId) {
-      sourceAccount = await prisma.account.findUnique({ where: { id: body.accountId } });
+    if (accountId) {
+      sourceAccount = await prisma.account.findUnique({ where: { id: accountId } });
     } else {
       sourceAccount = await prisma.account.findFirst({
         where: { accountCode: '1010' }, // Main EGP Safe
@@ -47,11 +106,11 @@ export async function POST(
       return NextResponse.json({ error: 'حساب الصندوق النقدي المصري غير موجود' }, { status: 400 });
     }
 
-    // Verify source account balance
+    // Pre-verify source account balance before attempting ledger posting
     const currentSafeBalance = new Decimal(sourceAccount.currentBalance.toString());
     if (currentSafeBalance.lessThan(amountEgp)) {
       return NextResponse.json({
-        error: `رصيد الصندوق النقدي لا يكفي. الرصيد الحالي: ${currentSafeBalance.toFixed(2)} EGP، والمطلوب: ${amountEgp} EGP`,
+        error: `رصيد الصندوق النقدي (${sourceAccount.name}) لا يكفي. الرصيد الحالي: ${currentSafeBalance.toFixed(2)} EGP، والمطلوب صرفه: ${amountEgp.toLocaleString()} EGP`,
       }, { status: 400 });
     }
 
@@ -66,8 +125,7 @@ export async function POST(
     const exchangeRate = Number(session.exchangeRate);
     const equivalentSdg = new Decimal(amountEgp).times(exchangeRate).toNumber();
 
-    // 1. Post double-entry accounting transactions for multi-currency settlement
-    // Leg A: Clear customer SDG liability against FX clearing if 2015/1065 exist
+    // 2. Post Multi-currency Balancing Ledger Entries
     const customerLiabilitySdg = await prisma.account.findFirst({ where: { accountCode: '2015' } });
     const currencyClearingSdg = await prisma.account.findFirst({ where: { accountCode: '1065' } });
 
@@ -97,7 +155,7 @@ export async function POST(
       });
     }
 
-    // Leg B: Deliver cash in EGP from safe and debit customer liability / clearing
+    // Leg B: Disburse cash in EGP from Safe/Custody
     await postLedgerTransaction({
       entryType: 'customer_cash_delivery',
       referenceType: 'CustomerSession',
@@ -117,12 +175,12 @@ export async function POST(
           currency: 'EGP',
           debit: 0,
           credit: amountEgp,
-          description: `صرف نقدي من الصندوق ${sourceAccount.name}`,
+          description: `صرف نقدي من ${sourceAccount.name}`,
         },
       ],
     });
 
-    // 2. Create ExchangeTransaction record
+    // 3. Create ExchangeTransaction Record
     const txnNumber = `TXN-${Date.now()}`;
     const exchangeTxn = await prisma.exchangeTransaction.create({
       data: {
@@ -138,25 +196,17 @@ export async function POST(
         status: 'approved',
         sourceAccountId: customerLiabilityAccount.id,
         destinationAccountId: sourceAccount.id,
-        employeeId: body.employeeId || null,
+        employeeId: employeeId || null,
         createdBy: user.name,
         approvedBy: user.name,
         approvedAt: new Date(),
       },
     });
 
-    // 3. Update Customer Session
+    // 4. Update Customer Session State
     const newDelivered = Number(session.deliveredAmount) + amountEgp;
-    const receivedAmount = Number(session.receivedAmount);
-    const expectedAmount = Number(session.expectedAmount);
     const requestedAmount = Number(session.requestedAmount);
-
-    let nextStatus = session.status;
-    if (newDelivered >= requestedAmount && receivedAmount >= expectedAmount) {
-      nextStatus = 'completed';
-    } else if (newDelivered > 0) {
-      nextStatus = 'partially_delivered';
-    }
+    const nextStatus = newDelivered >= requestedAmount ? 'completed' : 'partially_delivered';
 
     const updatedSession = await prisma.customerSession.update({
       where: { id: session.id },
@@ -165,6 +215,7 @@ export async function POST(
         status: nextStatus,
         closedAt: nextStatus === 'completed' ? new Date() : null,
         closedBy: nextStatus === 'completed' ? user.name : null,
+        payoutIdempotencyKey: idempotencyKey || null,
       },
       include: {
         customer: true,
@@ -173,24 +224,67 @@ export async function POST(
       },
     });
 
-    // 4. Audit Log
+    // 5. Generate Official Cash Payout Voucher (سند صرف نقدية رسمي)
+    const voucherNumber = `VCH-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const voucher = await prisma.cashPayoutVoucher.create({
+      data: {
+        voucherNumber,
+        customerSessionId: session.id,
+        customerId: session.customerId,
+        amount: amountEgp,
+        currency: 'EGP',
+        exchangeRate: exchangeRate,
+        equivalentSdg: equivalentSdg,
+        cashSourceAccountId: sourceAccount.id,
+        paidBy: user.name,
+        recipientName: recipientName || session.customer.name,
+        notes: notes || 'صرف نقدية مستحقة مقابل حوالات بنكك معتمدة',
+        status: 'issued',
+      },
+      include: {
+        customer: true,
+        customerSession: true,
+      },
+    });
+
+    // 6. Record Audit Event
     await logAuditEvent({
       userId: user.userId,
       action: 'DELIVER_CUSTOMER_CASH',
       entityType: 'CustomerSession',
       entityId: session.id,
-      newValues: { amountEgp, equivalentSdg, deliveredAmount: newDelivered, status: nextStatus },
-      reason: `تسليم نقدية بالجنيه المصري للعميل ${session.customer.name}`,
+      newValues: {
+        voucherNumber,
+        amountEgp,
+        equivalentSdg,
+        sourceAccount: sourceAccount.name,
+        status: nextStatus,
+      },
+      reason: `تسليم نقدية بالجنيه المصري للعميل ${session.customer.name} بموجب السند ${voucherNumber}`,
+    });
+
+    // 7. Dispatch Notification
+    await createNotification({
+      type: 'payout_completed',
+      title: 'تم إكمال صرف النقدية للعميل',
+      message: `تم صرف ${amountEgp.toLocaleString()} EGP للعميل ${session.customer.name} بموجب السند ${voucherNumber} من ${sourceAccount.name}`,
+      referenceType: 'CashPayoutVoucher',
+      referenceId: voucher.id,
+      recipientRole: 'accountant',
+      priority: 'high',
     });
 
     return NextResponse.json({
       success: true,
+      message: 'تم تنفيذ عملية الصرف وإصدار سند الصرف النقدي بنجاح',
       data: {
         session: updatedSession,
         exchangeTransaction: exchangeTxn,
+        voucher,
       },
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'خطأ أثناء تسليم النقدية' }, { status: 500 });
+    console.error('Error in cash delivery payout:', error);
+    return NextResponse.json({ error: error.message || 'خطأ أثناء تنفيذ صرف النقدية' }, { status: 500 });
   }
 }

@@ -25,7 +25,7 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
     updateTime();
     const interval = setInterval(updateTime, 1000);
 
-    // Fetch user & notifications
+    // Fetch user
     fetch('/api/v1/auth/me')
       .then((res) => res.json())
       .then((data) => {
@@ -37,19 +37,60 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
       })
       .catch(() => router.push('/login'));
 
-    fetch('/api/v1/notifications')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) setNotifications(data.data || []);
-      })
-      .catch(() => {});
+    // Polling function for real-time notifications
+    const fetchNotifications = () => {
+      fetch('/api/v1/notifications')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) setNotifications(data.data || []);
+        })
+        .catch(() => {});
+    };
 
-    return () => clearInterval(interval);
+    fetchNotifications();
+    const notifInterval = setInterval(fetchNotifications, 10000); // 10s polling
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(notifInterval);
+    };
   }, [router]);
 
   const handleLogout = async () => {
     await fetch('/api/v1/auth/me', { method: 'POST' });
     router.push('/login');
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      await fetch('/api/v1/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    } catch (e) {}
+  };
+
+  const handleNotificationClick = async (notif: any) => {
+    if (!notif.isRead) {
+      fetch('/api/v1/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: notif.id }),
+      }).catch(() => {});
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
+      );
+    }
+    setShowNotifications(false);
+    if (notif.referenceType === 'BankakReceipt') {
+      router.push('/receipts');
+    } else if (notif.referenceType === 'CustomerSession' || notif.referenceType === 'CashPayoutVoucher') {
+      router.push('/customer-sessions');
+    } else if (notif.referenceType === 'BankStatement') {
+      router.push('/reconciliation');
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
@@ -122,31 +163,61 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
           </button>
 
           {showNotifications && (
-            <div className="fixed sm:absolute inset-x-2 sm:inset-x-auto sm:left-0 top-16 sm:top-auto sm:mt-2 w-auto sm:w-80 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-50 text-right">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
-                <span className="font-bold text-sm text-slate-900">تنبيهات النظام</span>
-                <span
-                  onClick={() => setShowNotifications(false)}
-                  className="text-xs text-blue-600 cursor-pointer p-1"
-                >
-                  إغلاق
-                </span>
+            <div className="fixed sm:absolute inset-x-2 sm:inset-x-auto sm:left-0 top-16 sm:top-auto sm:mt-2 w-auto sm:w-88 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 z-50 text-right">
+              <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-2">
+                <div className="flex items-center space-x-2 space-x-reverse">
+                  <span className="font-bold text-sm text-slate-900">تنبيهات النظام</span>
+                  {unreadCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
+                      {unreadCount} جديد
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center space-x-2 space-x-reverse text-xs">
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={handleMarkAllAsRead}
+                      className="text-blue-600 hover:text-blue-800 font-semibold"
+                    >
+                      تحديد الكل كمقروء
+                    </button>
+                  )}
+                  <span
+                    onClick={() => setShowNotifications(false)}
+                    className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                  >
+                    إغلاق
+                  </span>
+                </div>
               </div>
-              <div className="max-h-64 overflow-y-auto space-y-2 touch-scroll">
+              <div className="max-h-72 overflow-y-auto space-y-2 touch-scroll">
                 {notifications.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-4">لا توجد إشعارات جديدة</p>
+                  <p className="text-xs text-slate-400 text-center py-6">لا توجد إشعارات جديدة</p>
                 ) : (
                   notifications.map((n) => (
                     <div
                       key={n.id}
-                      className={`p-2.5 rounded-lg text-xs border ${
-                        n.type === 'duplicate_receipt'
-                          ? 'bg-rose-50 border-rose-200 text-rose-900'
-                          : 'bg-slate-50 border-slate-200 text-slate-800'
+                      onClick={() => handleNotificationClick(n)}
+                      className={`p-3 rounded-xl text-xs border cursor-pointer transition-colors ${
+                        !n.isRead ? 'ring-1 ring-blue-500/30' : 'opacity-75'
+                      } ${
+                        n.priority === 'urgent' || n.type === 'duplicate_receipt'
+                          ? 'bg-rose-50 border-rose-200 text-rose-950 hover:bg-rose-100/70'
+                          : n.priority === 'high' || n.type === 'overpayment_detected' || n.type === 'suspicious_receipt'
+                          ? 'bg-amber-50 border-amber-200 text-amber-950 hover:bg-amber-100/70'
+                          : 'bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100'
                       }`}
                     >
-                      <p className="font-bold mb-0.5">{n.title}</p>
-                      <p className="text-slate-600">{n.message}</p>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="font-black truncate max-w-[200px]">{n.title}</p>
+                        {!n.isRead && (
+                          <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0"></span>
+                        )}
+                      </div>
+                      <p className="text-slate-600 text-[11px] leading-relaxed">{n.message}</p>
+                      <span className="text-[10px] text-slate-400 mt-1 block">
+                        {new Date(n.createdAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
                   ))
                 )}

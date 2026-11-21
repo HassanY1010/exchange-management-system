@@ -6,30 +6,78 @@ export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
-  const notifications = await prisma.notification.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 50,
-  });
+  const { searchParams } = new URL(req.url);
+  const unreadOnly = searchParams.get('unread') === 'true';
+  const priority = searchParams.get('priority');
 
-  return NextResponse.json({ success: true, data: notifications });
+  const whereClause: any = {};
+
+  // Role-based targeted notification routing
+  if (user.role !== 'admin') {
+    whereClause.OR = [
+      { recipientRole: 'all' },
+      { recipientRole: user.role },
+      { recipientRole: null },
+      { userId: user.userId },
+    ];
+  }
+
+  if (unreadOnly) {
+    whereClause.isRead = false;
+  }
+  if (priority) {
+    whereClause.priority = priority;
+  }
+
+  const [notifications, unreadCount] = await Promise.all([
+    prisma.notification.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' },
+      take: 60,
+    }),
+    prisma.notification.count({
+      where: {
+        ...whereClause,
+        isRead: false,
+      },
+    }),
+  ]);
+
+  return NextResponse.json({
+    success: true,
+    data: notifications,
+    unreadCount,
+  });
 }
 
 export async function PATCH(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
-  const { id } = await req.json();
+  const body = await req.json().catch(() => ({}));
+  const { id } = body;
+
   if (id) {
     await prisma.notification.update({
       where: { id },
-      data: { isRead: true },
+      data: { isRead: true, readAt: new Date() },
     });
   } else {
+    // Mark all as read for this user/role
+    const updateWhere: any = { isRead: false };
+    if (user.role !== 'admin') {
+      updateWhere.OR = [
+        { recipientRole: 'all' },
+        { recipientRole: user.role },
+        { recipientRole: null },
+        { userId: user.userId },
+      ];
+    }
     await prisma.notification.updateMany({
-      where: { isRead: false },
-      data: { isRead: true },
+      where: updateWhere,
+      data: { isRead: true, readAt: new Date() },
     });
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, message: 'تم تحديث حالة الإشعارات بنجاح' });
 }

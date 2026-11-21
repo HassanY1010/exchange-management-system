@@ -81,10 +81,13 @@ export interface SessionBalanceInput {
 export interface SessionBalanceResult {
   expectedSdgAmount: number;
   receivedSdgAmount: number;
-  remainingSdgAmount: number; // expected - received
+  remainingSdgAmount: number; // max(0, expected - received)
+  overpaymentAmount: number;  // max(0, received - expected)
+  amountAvailableForSettlement: number;
+  isOverpaid: boolean;
   deliveredEgpAmount: number;
   remainingEgpToDeliver: number; // requested - delivered
-  isFullyPaid: boolean;       // all SDG received
+  isFullyPaid: boolean;       // all SDG received (received >= expected)
   isFullyDelivered: boolean;  // all EGP delivered
   isCompleted: boolean;       // both satisfied
   status: 'open' | 'pending_receipts' | 'pending_delivery' | 'completed' | 'has_balance';
@@ -97,10 +100,27 @@ export function calculateSessionBalance(input: SessionBalanceInput): SessionBala
   const dDeliveredEgp = new Decimal(input.deliveredEgpAmount || 0);
 
   const expectedSdg = dRequestedEgp.times(dRate);
-  const remainingSdg = expectedSdg.minus(dReceivedSdg);
+  const rawDiffSdg = dReceivedSdg.minus(expectedSdg);
+
+  // If received exceeds expected: remaining is 0 and overpayment is rawDiff
+  let remainingSdg = new Decimal(0);
+  let overpaymentSdg = new Decimal(0);
+  let isOverpaid = false;
+
+  if (rawDiffSdg.greaterThan(0.0001)) {
+    overpaymentSdg = rawDiffSdg;
+    remainingSdg = new Decimal(0);
+    isOverpaid = true;
+  } else {
+    remainingSdg = expectedSdg.minus(dReceivedSdg);
+    if (remainingSdg.lessThan(0)) remainingSdg = new Decimal(0);
+    overpaymentSdg = new Decimal(0);
+    isOverpaid = false;
+  }
+
   const remainingEgp = dRequestedEgp.minus(dDeliveredEgp);
 
-  const isFullyPaid = remainingSdg.lessThanOrEqualTo(0.0001);
+  const isFullyPaid = dReceivedSdg.greaterThanOrEqualTo(expectedSdg.minus(0.0001));
   const isFullyDelivered = remainingEgp.lessThanOrEqualTo(0.0001);
   const isCompleted = isFullyPaid && isFullyDelivered;
 
@@ -119,6 +139,9 @@ export function calculateSessionBalance(input: SessionBalanceInput): SessionBala
     expectedSdgAmount: expectedSdg.toDecimalPlaces(2).toNumber(),
     receivedSdgAmount: dReceivedSdg.toDecimalPlaces(2).toNumber(),
     remainingSdgAmount: remainingSdg.toDecimalPlaces(2).toNumber(),
+    overpaymentAmount: overpaymentSdg.toDecimalPlaces(2).toNumber(),
+    amountAvailableForSettlement: overpaymentSdg.toDecimalPlaces(2).toNumber(),
+    isOverpaid,
     deliveredEgpAmount: dDeliveredEgp.toDecimalPlaces(2).toNumber(),
     remainingEgpToDeliver: remainingEgp.toDecimalPlaces(2).toNumber(),
     isFullyPaid,

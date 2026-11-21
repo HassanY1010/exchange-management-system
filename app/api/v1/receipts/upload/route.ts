@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { parseBankakReceiptText, computeImageHash } from '@/lib/ocr/bankak-parser';
+import { parseBankakReceiptText, computeImageHash, evaluateReceiptRisk } from '@/lib/ocr/bankak-parser';
 import { processReceiptImageWithOcr } from '@/lib/ocr/image-ocr';
 import { uploadReceiptImage } from '@/lib/storage/supabase-storage';
 import { logAuditEvent } from '@/lib/audit';
+import { createNotification } from '@/lib/notifications/notification-service';
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -16,6 +17,24 @@ export async function POST(req: NextRequest) {
     const items = Array.isArray(body.items) ? body.items : [body];
 
     const results = [];
+
+    // Pre-fetch all non-rejected receipts for multi-attribute risk and duplicate evaluation
+    const existingReceipts = await prisma.bankakReceipt.findMany({
+      where: {
+        status: { not: 'rejected' },
+      },
+      select: {
+        id: true,
+        receiptNumber: true,
+        transactionId: true,
+        imageHash: true,
+        amount: true,
+        transactionDate: true,
+        senderName: true,
+        status: true,
+        customer: { select: { name: true } },
+      },
+    });
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -44,24 +63,23 @@ export async function POST(req: NextRequest) {
       const transactionDate = item.transactionDate || parsed.transactionDate;
       const transactionTime = item.transactionTime || parsed.transactionTime;
 
-      // Check for duplicate receipt
-      const existingReceipt = await prisma.bankakReceipt.findFirst({
-        where: {
-          OR: [
-            { transactionId: transactionId },
-            { imageHash: imageHash },
-          ],
+      // Comprehensive Anti-Fraud & Risk Assessment (Tier 1 Duplicate, Tier 2 Suspicious)
+      const riskAssessment = evaluateReceiptRisk(
+        {
+          transactionId,
+          imageHash,
+          amount,
+          transactionDate,
+          senderName,
         },
-        include: { customer: true },
-      });
+        existingReceipts
+      );
 
-      let status = 'pending_review';
-      let duplicateOfId = null;
-
-      if (existingReceipt) {
-        status = 'duplicate';
-        duplicateOfId = existingReceipt.id;
-      }
+      const status = riskAssessment.status;
+      const isDuplicate = riskAssessment.isDuplicate;
+      const isSuspicious = riskAssessment.isSuspicious;
+      const duplicateOfId = riskAssessment.matchedReceiptId || null;
+      const suspicionReason = riskAssessment.reason || null;
 
       const receiptNumber = `RCP-${Date.now()}-${i + 1}`;
 
@@ -93,6 +111,8 @@ export async function POST(req: NextRequest) {
           imageHash,
           status,
           duplicateOfId,
+          isSuspicious,
+          suspicionReason,
           createdBy: user.name,
         },
         include: {
@@ -101,30 +121,56 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      if (status === 'duplicate') {
-        // Create duplicate notification
-        await prisma.notification.create({
-          data: {
-            userId: user.userId,
-            type: 'duplicate_receipt',
-            title: 'تحذير: إيصال بنكك مكرر',
-            message: `تم اكتشاف إيصال مكرر برقم عملية ${transactionId} بمبلغ ${amount.toLocaleString()} SDG مسجل مسبقاً للعميل ${existingReceipt?.customer?.name || 'غير معروف'}`,
+      // Dispatch targeted contextual notifications
+      if (isDuplicate) {
+        await createNotification({
+          type: 'duplicate_receipt',
+          title: 'تحذير حاسم: اكتشاف إيصال بنكك مكرر!',
+          message: riskAssessment.reason || `تم اكتشاف إيصال مكرر برقم عملية ${transactionId} بمبلغ ${amount.toLocaleString()} SDG`,
+          referenceType: 'BankakReceipt',
+          referenceId: receipt.id,
+          recipientRole: 'accountant',
+          priority: 'urgent',
+        });
+      } else if (isSuspicious) {
+        await createNotification({
+          type: 'suspicious_receipt',
+          title: 'تنبيه: إيصال مشتبه به يحتاج تدقيقاً إضافياً',
+          message: riskAssessment.reason || `إيصال بمبلغ ${amount.toLocaleString()} SDG يطابق خصائص إيصال سابق`,
+          referenceType: 'BankakReceipt',
+          referenceId: receipt.id,
+          recipientRole: 'accountant',
+          priority: 'high',
+        });
+      } else {
+        await createNotification({
+          type: 'receipt_uploaded',
+          title: 'إيصال بنكك جديد بانتظار التحقق',
+          message: `تم رفع إيصال جديد برقم ${transactionId} بمبلغ ${amount.toLocaleString()} SDG للعميل ${receipt.customer?.name || 'عام'}`,
+          referenceType: 'BankakReceipt',
+          referenceId: receipt.id,
+          recipientRole: 'accountant',
+          priority: 'normal',
+        });
+
+        if (parsed.ocrConfidence < 70) {
+          await createNotification({
+            type: 'pending_review',
+            title: 'دقة قراءة منخفضة للإيصال (OCR)',
+            message: `دقة استخراج الإيصال رقم ${transactionId} بلغت ${parsed.ocrConfidence}%. يتطلب مراجعة يدوية وتعديلاً قبل الاعتماد`,
             referenceType: 'BankakReceipt',
             referenceId: receipt.id,
-          },
-        });
+            recipientRole: 'data_entry',
+            priority: 'normal',
+          });
+        }
       }
 
       results.push({
         ...receipt,
-        isDuplicate: status === 'duplicate',
-        duplicateDetails: existingReceipt
-          ? {
-              originalReceiptNumber: existingReceipt.receiptNumber,
-              customerName: existingReceipt.customer?.name,
-              createdAt: existingReceipt.createdAt,
-            }
-          : null,
+        isDuplicate,
+        isSuspicious,
+        riskReason: suspicionReason,
       });
     }
 
@@ -132,7 +178,11 @@ export async function POST(req: NextRequest) {
       userId: user.userId,
       action: 'BATCH_RECEIPTS_UPLOAD',
       entityType: 'BankakReceipt',
-      newValues: { count: results.length, duplicates: results.filter((r) => r.isDuplicate).length },
+      newValues: {
+        count: results.length,
+        duplicates: results.filter((r) => r.isDuplicate).length,
+        suspicious: results.filter((r) => r.isSuspicious).length,
+      },
       reason: `رفع دفعة إيصالات بنكك (${results.length} إيصال)`,
     });
 

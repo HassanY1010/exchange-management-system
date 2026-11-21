@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { calculateExchange } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
+import { createNotification } from '@/lib/notifications/notification-service';
 
 export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest) {
         orderBy: { createdAt: 'desc' },
       },
       transactions: true,
+      vouchers: true,
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -65,6 +67,7 @@ export async function POST(req: NextRequest) {
         receivedAmount: 0,
         deliveredAmount: 0,
         remainingAmount: calc.toAmount,
+        overpaymentAmount: 0,
         status: 'open',
         createdBy: user.name,
       },
@@ -80,6 +83,16 @@ export async function POST(req: NextRequest) {
       entityId: session.id,
       newValues: session,
       reason: `فتح جلسة حساب يومية جديدة للعميل ${session.customer.name}`,
+    });
+
+    await createNotification({
+      type: 'session_created',
+      title: 'جلسة حساب يومية جديدة للعميل',
+      message: `تم فتح جلسة جديدة برقم ${session.sessionNumber} للعميل ${session.customer.name}. المطلوب: ${Number(requestedAmount).toLocaleString()} EGP مقابل ${Number(calc.toAmount).toLocaleString()} SDG`,
+      referenceType: 'CustomerSession',
+      referenceId: session.id,
+      recipientRole: 'accountant',
+      priority: 'normal',
     });
 
     return NextResponse.json({ success: true, data: session }, { status: 201 });

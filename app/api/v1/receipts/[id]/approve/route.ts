@@ -4,6 +4,7 @@ import { getUserFromRequest, authError } from '@/lib/auth';
 import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
 import { calculateSessionBalance } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
+import { createNotification } from '@/lib/notifications/notification-service';
 
 export async function POST(
   req: NextRequest,
@@ -17,10 +18,13 @@ export async function POST(
   }
 
   try {
+    const body = await req.json().catch(() => ({}));
+    const { directVerification = false } = body;
+
     // Atomic row-level lock and idempotency check
     const receipt = await prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRawUnsafe<any[]>(
-        'SELECT id, "status", "amount", "transactionId", "customerId", "customerSessionId" FROM "BankakReceipt" WHERE id = $1 FOR UPDATE',
+        'SELECT id, "status", "amount", "transactionId", "customerId", "customerSessionId", "verifiedBy" FROM "BankakReceipt" WHERE id = $1 FOR UPDATE',
         params.id
       );
       if (!locked || locked.length === 0) {
@@ -32,14 +36,31 @@ export async function POST(
       if (locked[0].status === 'duplicate') {
         throw new Error('لا يمكن اعتماد إيصال مكرر مسجل في النظام');
       }
+      if (locked[0].status === 'rejected') {
+        throw new Error('لا يمكن اعتماد إيصال تم رفضه مسبقاً');
+      }
+
+      // Enforce Verified State prior to Financial Approval (or Admin direct dual-verification)
+      if (locked[0].status !== 'verified' && !directVerification && user.role !== 'admin') {
+        throw new Error('لا يمكن الاعتماد المالي للإيصال قبل التحقق من وصول الأموال لحساب بنكك أولاً (يجب أن تكون حالة الإيصال Verified)');
+      }
+
+      const updateData: any = {
+        status: 'approved',
+        approvedBy: user.name,
+        approvedAt: new Date(),
+      };
+
+      if (!locked[0].verifiedBy) {
+        updateData.verifiedBy = user.name;
+        updateData.verifiedAt = new Date();
+        updateData.verificationSource = directVerification ? 'accountant_direct_approval' : 'admin_approval';
+        updateData.verificationNotes = 'تم التحقق والاعتماد في خطوة واحدة بواسطة المسؤول المعتمد';
+      }
 
       await tx.bankakReceipt.update({
         where: { id: params.id },
-        data: {
-          status: 'approved',
-          approvedBy: user.name,
-          approvedAt: new Date(),
-        },
+        data: updateData,
       });
 
       return await tx.bankakReceipt.findUnique({
@@ -110,13 +131,47 @@ export async function POST(
         data: {
           receivedAmount: balanceCheck.receivedSdgAmount,
           remainingAmount: balanceCheck.remainingSdgAmount,
+          overpaymentAmount: balanceCheck.overpaymentAmount,
           status: balanceCheck.status,
         },
       });
+
+      // Dispatched alerts for Session Ready for Payout or Overpayment
+      if (balanceCheck.isOverpaid) {
+        await createNotification({
+          type: 'overpayment_detected',
+          title: 'تنبيه: فائض سداد للعميل (Overpayment)',
+          message: `جلسة العميل ${receipt.customer?.name || ''} تحتوي على فائض بمبلغ ${balanceCheck.overpaymentAmount.toLocaleString()} SDG يتطلب تسوية أو ترحيل`,
+          referenceType: 'CustomerSession',
+          referenceId: currentSession.id,
+          recipientRole: 'accountant',
+          priority: 'high',
+        });
+      }
+
+      if (balanceCheck.status === 'pending_delivery') {
+        await createNotification({
+          type: 'session_ready_for_payout',
+          title: 'جلسة العميل جاهزة للصرف النقدي (Ready for Payout)',
+          message: `اكتمل استيفاء مبالغ بنكك لجلسة ${currentSession.sessionNumber} للعميل ${receipt.customer?.name || ''}. المبلغ المستحق للصرف: ${Number(currentSession.requestedAmount).toLocaleString()} EGP`,
+          referenceType: 'CustomerSession',
+          referenceId: currentSession.id,
+          recipientRole: 'custody_officer',
+          priority: 'high',
+        });
+      }
     }
 
-    // 3. Receipt already marked approved inside atomic lock
-    const updatedReceipt = receipt;
+    // 3. Dispatch receipt approved notification
+    await createNotification({
+      type: 'receipt_approved',
+      title: 'تم اعتماد إيصال بنكك وتسجيل القيد المالي',
+      message: `تم اعتماد إيصال بنكك رقم ${receipt.transactionId} بمبلغ ${receiptAmount.toLocaleString()} SDG بنجاح في الحسابات`,
+      referenceType: 'BankakReceipt',
+      referenceId: receipt.id,
+      recipientRole: 'all',
+      priority: 'normal',
+    });
 
     await logAuditEvent({
       userId: user.userId,
@@ -131,7 +186,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       message: 'تم اعتماد الإيصال وتسجيل الأثر المالي بنجاح',
-      data: updatedReceipt,
+      data: receipt,
     });
   } catch (error: any) {
     console.error('Error approving receipt:', error);

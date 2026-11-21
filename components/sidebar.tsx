@@ -28,6 +28,7 @@ export const menuItems = [
   { href: '/customers', label: 'العملاء', icon: Users },
   { href: '/customer-sessions', label: 'الحسابات اليومية', icon: CalendarDays },
   { href: '/receipts', label: 'إيصالات بنكك والـ OCR', icon: FileCheck2 },
+  { href: '/reconciliation', label: 'مطابقة كشف الحساب البنكي', icon: Scale },
   { href: '/custody', label: 'الموظفون والعهد', icon: UserCheck },
   { href: '/suppliers', label: 'الموردون ومخزون العملات', icon: Building2 },
   { href: '/accounts', label: 'الصناديق والحسابات المالية', icon: Wallet },

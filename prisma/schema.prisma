@@ -70,6 +70,7 @@ model Customer {
   sessions       CustomerSession[]
   transactions   ExchangeTransaction[]
   receipts       BankakReceipt[]
+  vouchers       CashPayoutVoucher[]
 }
 
 model CustomerSession {
@@ -87,6 +88,10 @@ model CustomerSession {
   receivedAmount  Decimal               @default(0) @db.Decimal(20, 4) // total approved receipts in SDG
   deliveredAmount Decimal               @default(0) @db.Decimal(20, 4) // delivered to customer in EGP
   remainingAmount Decimal               @default(0) @db.Decimal(20, 4) // remaining SDG to receive
+  overpaymentAmount Decimal             @default(0) @db.Decimal(20, 4) // verified receipts over expected amount in SDG
+  overpaymentSettled Boolean            @default(false)
+  overpaymentAction String?             // credit_balance, cash_refund, customer_liability
+  payoutIdempotencyKey String?
   createdBy       String
   closedBy        String?
   closedAt        DateTime?
@@ -95,6 +100,7 @@ model CustomerSession {
 
   receipts        BankakReceipt[]
   transactions    ExchangeTransaction[]
+  vouchers        CashPayoutVoucher[]
 }
 
 model ExchangeTransaction {
@@ -147,9 +153,16 @@ model BankakReceipt {
   ocrConfidence         Float                @default(0)
   imageStorageKey       String
   imageHash             String               // SHA-256 for duplicate detection
-  status                String               @default("uploaded") // uploaded, processing, ocr_completed, pending_review, verified, approved, duplicate, rejected, failed
+  status                String               @default("uploaded") // uploaded, processing, ocr_completed, pending_review, pending_verification, verified, approved, duplicate, rejected, suspicious, failed
   duplicateOfId         String?
   reviewedBy            String?
+  verifiedBy            String?
+  verifiedAt            DateTime?
+  verificationSource    String?              // mobile_app, bank_statement, teller_confirmation, official_api
+  verificationBankAccountId String?
+  verificationNotes     String?
+  isSuspicious          Boolean              @default(false)
+  suspicionReason       String?
   approvedBy            String?
   approvedAt            DateTime?
   createdBy             String
@@ -402,15 +415,77 @@ model AuditLog {
 }
 
 model Notification {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   userId        String?
-  type          String   // duplicate_receipt, pending_review, session_unbalanced, custody_alert, closing_difference, rate_change
+  recipientRole String?   // all, admin, accountant, custody_officer, data_entry
+  priority      String    @default("normal") // low, normal, high, urgent
+  type          String    // duplicate_receipt, pending_review, receipt_verified, receipt_approved, receipt_rejected, session_unbalanced, session_ready_for_payout, overpayment_detected, payout_completed, custody_alert, closing_difference, rate_change, system_alert
   title         String
   message       String
   referenceType String?
   referenceId   String?
-  isRead        Boolean  @default(false)
-  createdAt     DateTime @default(now())
+  isRead        Boolean   @default(false)
+  readAt        DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model CashPayoutVoucher {
+  id                  String          @id @default(uuid())
+  voucherNumber       String          @unique
+  customerSessionId   String
+  customerSession     CustomerSession @relation(fields: [customerSessionId], references: [id])
+  customerId          String
+  customer            Customer        @relation(fields: [customerId], references: [id])
+  amount              Decimal         @db.Decimal(20, 4)
+  currency            String          @default("EGP")
+  exchangeRate        Decimal         @db.Decimal(20, 4)
+  equivalentSdg       Decimal         @db.Decimal(20, 4)
+  cashSourceAccountId String
+  paidBy              String
+  paidAt              DateTime        @default(now())
+  recipientName       String
+  notes               String?
+  status              String          @default("issued") // issued, cancelled
+  createdAt           DateTime        @default(now())
+}
+
+model BankStatement {
+  id              String              @id @default(uuid())
+  statementNumber String              @unique
+  bankName        String              @default("بنكك - بنك الخرطوم")
+  accountId       String?
+  filename        String
+  fileStorageKey  String?
+  startDate       String?
+  endDate         String?
+  totalLines      Int                 @default(0)
+  matchedLines    Int                 @default(0)
+  unmatchedLines  Int                 @default(0)
+  status          String              @default("uploaded") // uploaded, reconciled, confirmed
+  importedBy      String
+  createdAt       DateTime            @default(now())
+
+  lines           BankStatementLine[]
+}
+
+model BankStatementLine {
+  id               String        @id @default(uuid())
+  statementId      String
+  statement        BankStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  transactionDate  String
+  transactionTime  String?
+  transactionId    String
+  description      String?
+  amount           Decimal       @db.Decimal(20, 4)
+  currency         String        @default("SDG")
+  senderName       String?
+  beneficiaryName  String?
+  matchStatus      String        @default("unmatched") // matched, unmatched, amount_mismatch, suspicious, duplicate
+  matchedReceiptId String?
+  matchedAt        DateTime?
+  matchedBy        String?
+  notes            String?
+  createdAt        DateTime      @default(now())
 }
 
 model FileRecord {
