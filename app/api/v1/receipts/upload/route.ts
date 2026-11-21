@@ -109,13 +109,22 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Perform OCR and hash computation using Tesseract.js / Heuristic engine
-      const ocrResult = await processReceiptImageWithOcr(
+      const itemStartTime = Date.now();
+
+      // Parallelize OCR text extraction and Storage upload concurrently
+      const ocrTask = processReceiptImageWithOcr(
         imageData || `synthetic-${Date.now()}-${i}`,
         rawOcrText || item.ocrText
       );
+
+      const storageTask = imageData
+        ? uploadReceiptImage(imageData, `rcp-${Date.now()}-${i}.png`)
+        : Promise.resolve({ storageKey: 'no-image', signedUrl: undefined, source: 'local_storage' as const });
+
+      const [ocrResult, uploadResult] = await Promise.all([ocrTask, storageTask]);
       const imageHash = ocrResult.imageHash;
       const parsed = ocrResult.parsed;
+      const imageStorageKey = uploadResult.signedUrl || uploadResult.storageKey || 'no-image';
 
       // Override with user fields if explicitly provided
       const transactionId = (item.transactionId || parsed.transactionId || '').trim();
@@ -151,13 +160,6 @@ export async function POST(req: NextRequest) {
       let suspicionReason = riskAssessment.reason || null;
 
       const receiptNumber = `RCP-${Date.now()}-${i + 1}`;
-
-      // Upload to Storage if configured
-      let imageStorageKey = 'no-image';
-      if (imageData) {
-        const uploadResult = await uploadReceiptImage(imageData, `rcp-${Date.now()}-${transactionId || 'notxn'}.png`);
-        imageStorageKey = uploadResult.publicUrl || uploadResult.storageKey;
-      }
 
       // Concurrency-safe DB insert with advisory lock & unique constraint protection
       const receipt = await prisma.$transaction(async (tx) => {
@@ -327,6 +329,9 @@ export async function POST(req: NextRequest) {
         isSuspicious,
         riskReason: suspicionReason,
       });
+
+      const itemDuration = Date.now() - itemStartTime;
+      console.log(`[OCR Performance] Item ${i + 1}/${items.length}: Total=${itemDuration}ms (OCR=${ocrResult.durationMs}ms, Engine=${ocrResult.engineUsed}, Status=${receipt.status})`);
     }
 
     await logAuditEvent({

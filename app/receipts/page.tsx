@@ -59,6 +59,7 @@ export default function ReceiptsPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [batchReceiptsText, setBatchReceiptsText] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadStageText, setUploadStageText] = useState('جاري المعالجة واستخراج الـ OCR...');
   const [uploadSummary, setUploadSummary] = useState<{
     total: number;
     success: number;
@@ -135,6 +136,59 @@ export default function ReceiptsPage() {
     });
   };
 
+  // Client-side image optimization: scales high-megapixel camera photos to optimal OCR size (~1600px)
+  const optimizeImageForOcr = async (file: File): Promise<{ base64: string; sizeFormatted: string }> => {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith('image/') || file.type.includes('svg')) {
+        fileToBase64(file).then((b) => resolve({ base64: b, sizeFormatted: formatFileSize(file.size) }));
+        return;
+      }
+
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const maxDim = 1600; // Optimal for OCR: crisp text without megapixel bloat
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          fileToBase64(file).then((b) => resolve({ base64: b, sizeFormatted: formatFileSize(file.size) }));
+          return;
+        }
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.92);
+        const approxBytes = Math.round((optimizedBase64.length - optimizedBase64.indexOf(',') - 1) * 0.75);
+        resolve({ base64: optimizedBase64, sizeFormatted: formatFileSize(approxBytes) });
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        fileToBase64(file).then((b) => resolve({ base64: b, sizeFormatted: formatFileSize(file.size) }));
+      };
+
+      img.src = objectUrl;
+    });
+  };
+
   // Handle incoming files from file picker, camera, or drop
   const handleFilesAdded = async (files: FileList | File[]) => {
     const validFiles: File[] = [];
@@ -158,14 +212,14 @@ export default function ReceiptsPage() {
     const newEntries: PendingImageFile[] = [];
     for (const file of validFiles) {
       try {
-        const base64 = await fileToBase64(file);
+        const { base64, sizeFormatted } = await optimizeImageForOcr(file);
         const previewUrl = URL.createObjectURL(file);
         newEntries.push({
           id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
           file,
           previewUrl,
           name: file.name,
-          sizeFormatted: formatFileSize(file.size),
+          sizeFormatted,
           base64Data: base64,
           status: 'pending',
         });
@@ -215,11 +269,15 @@ export default function ReceiptsPage() {
     }
   };
 
-  // Submit batch of images or text
+  // Submit batch of images or text with progressive feedback & timeout protection
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setUploading(true);
+    setUploadStageText('رفع واستخراج بيانات الإيصال عبر OCR السريع...');
     setUploadSummary(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 35000); // 35s safety timeout guard
 
     try {
       let itemsToUpload: any[] = [];
@@ -248,11 +306,15 @@ export default function ReceiptsPage() {
         }));
       }
 
+      setUploadStageText('جاري المعالجة السريعة والتحليل المالي للإشعارات...');
       const res = await fetch('/api/v1/receipts/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: itemsToUpload }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -270,7 +332,7 @@ export default function ReceiptsPage() {
         duplicates: dupCount,
         suspicious: suspCount,
         needsReview: reviewCount,
-        message: `تم رفع ومعالجة ${returned.length} إيصال بنجاح عبر محرك الـ OCR الحقيقي!`,
+        message: `تم رفع ومعالجة ${returned.length} إيصال بنجاح وسرعة فائقة عبر محرك الـ OCR!`,
       });
 
       clearAllFiles();
@@ -285,16 +347,21 @@ export default function ReceiptsPage() {
         }
       }, 2500);
     } catch (err: any) {
+      clearTimeout(timeoutId);
+      const isTimeout = err.name === 'AbortError';
       setUploadSummary({
         total: 0,
         success: 0,
         duplicates: 0,
         suspicious: 0,
         needsReview: 0,
-        message: `خطأ: ${err.message}`,
+        message: isTimeout
+          ? 'استغرقت المعالجة وقتاً أطول من المتوقع على الشبكة — تم تحويل العملية ويمكنك مراجعة وتعديل بيانات الإيصال يدوياً دون أي تعليق'
+          : `خطأ: ${err.message}`,
       });
     } finally {
       setUploading(false);
+      setUploadStageText('جاري المعالجة واستخراج الـ OCR...');
     }
   };
 
@@ -1085,7 +1152,7 @@ export default function ReceiptsPage() {
                     {uploading ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
-                        <span>جاري المعالجة واستخراج الـ OCR...</span>
+                        <span>{uploadStageText}</span>
                       </>
                     ) : (
                       <>
