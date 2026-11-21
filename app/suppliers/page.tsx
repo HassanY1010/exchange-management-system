@@ -123,24 +123,24 @@ export default function SuppliersPage() {
     <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-black text-slate-900">الموردون ومخزون العملات (Suppliers & Trading)</h1>
-            <p className="text-sm text-slate-500">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900">الموردون ومخزون العملات (Suppliers & Trading)</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
               عمليات شراء وبيع العملات بالجملة، إدارة تكلفة العملة ومتوسط التكلفة المرجح (WAC)
             </p>
           </div>
-          <div className="flex items-center space-x-2 space-x-reverse">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <button
               onClick={() => setTradeModalOpen(true)}
-              className="flex items-center space-x-1.5 space-x-reverse bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-amber-500/20 transition-all"
+              className="flex items-center justify-center space-x-1.5 space-x-reverse bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-amber-500/20 transition-all min-h-[44px]"
             >
               <TrendingUp className="w-4 h-4" />
               <span>تنفيذ عملية شراء / بيع عملة</span>
             </button>
             <button
               onClick={() => setNewSupplierOpen(true)}
-              className="flex items-center space-x-1.5 space-x-reverse bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md transition-all"
+              className="flex items-center justify-center space-x-1.5 space-x-reverse bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md transition-all min-h-[44px]"
             >
               <Plus className="w-4 h-4" />
               <span>إضافة مورد جديد</span>
@@ -149,9 +149,9 @@ export default function SuppliersPage() {
         </div>
 
         {/* Suppliers List */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {suppliers.map((sup) => (
-            <div key={sup.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+            <div key={sup.id} className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <span className="font-mono text-xs font-bold bg-amber-50 text-amber-700 px-2 py-0.5 rounded">
                   {sup.supplierCode}
@@ -161,26 +161,103 @@ export default function SuppliersPage() {
                 </span>
               </div>
               <h3 className="font-bold text-base text-slate-900 mb-2">{sup.name}</h3>
-              <div className="text-xs text-slate-600 space-y-1">
+              <div className="text-xs text-slate-600 space-y-1.5">
                 <div className="flex items-center space-x-2 space-x-reverse">
-                  <Phone className="w-3.5 h-3.5 text-slate-400" />
-                  <span dir="ltr">{sup.phone}</span>
+                  <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <a href={`tel:${sup.phone}`} dir="ltr" className="hover:text-amber-600 font-mono">
+                    {sup.phone}
+                  </a>
                 </div>
-                {sup.address && <div>{sup.address}</div>}
+                {sup.address && <div className="text-slate-500">{sup.address}</div>}
               </div>
-              <div className="pt-3 border-t border-slate-100 mt-4 text-xs text-slate-400">
-                {sup._count?.transactions || 0} عمليات مسجلة
+              <div className="pt-3 border-t border-slate-100 mt-4 flex items-center justify-between text-xs text-slate-500">
+                <span>{sup._count?.transactions || 0} عمليات مسجلة</span>
+                <button
+                  onClick={() => {
+                    setSelectedSupplierId(sup.id);
+                    setTradeModalOpen(true);
+                  }}
+                  className="text-amber-600 hover:text-amber-700 font-bold"
+                >
+                  تداول الآن &larr;
+                </button>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Supplier Transactions Table */}
+        {/* Supplier Transactions Section */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-100">
-            <h3 className="font-bold text-sm text-slate-900">سجل عمليات تداول العملات مع الموردين</h3>
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="font-bold text-sm sm:text-base text-slate-900">سجل عمليات تداول العملات مع الموردين</h3>
+            <span className="text-xs text-slate-400 font-mono font-bold">{transactions.length} عملية</span>
           </div>
-          <div className="overflow-x-auto">
+
+          {/* Mobile Transactions Cards (< lg) */}
+          <div className="lg:hidden divide-y divide-slate-100">
+            {transactions.length === 0 ? (
+              <div className="text-center py-10 text-slate-400 text-sm">
+                لا توجد عمليات مسجلة مع الموردين حتى الآن
+              </div>
+            ) : (
+              transactions.map((tx) => (
+                <div key={tx.id} className="p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                      {tx.transactionNumber}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                      مكتملة ومرحلة
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-blue-700">{tx.supplier?.name}</span>
+                    <span className="font-mono text-[11px] text-slate-400">
+                      {new Date(tx.createdAt).toLocaleDateString('ar-EG')}
+                    </span>
+                  </div>
+
+                  <div>
+                    {tx.transactionType === 'BUY_SDG_PAY_EGP' ? (
+                      <span className="text-emerald-700 font-bold text-xs inline-flex items-center gap-1">
+                        <ArrowDownLeft className="w-3.5 h-3.5 shrink-0" />
+                        <span>شراء سوداني (دفع مصري)</span>
+                      </span>
+                    ) : (
+                      <span className="text-blue-700 font-bold text-xs inline-flex items-center gap-1">
+                        <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
+                        <span>بيع سوداني (استلام مصري)</span>
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl text-xs">
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">مبلغ السوداني</span>
+                      <span className="font-mono font-bold text-slate-900">
+                        {(tx.transactionType === 'BUY_SDG_PAY_EGP' ? tx.fromAmount : tx.toAmount).toLocaleString()} SDG
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">مبلغ المصري</span>
+                      <span className="font-mono font-bold text-slate-900">
+                        {(tx.transactionType === 'BUY_SDG_PAY_EGP' ? tx.toAmount : tx.fromAmount).toLocaleString()} EGP
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                    <span>سعر الصرف:</span>
+                    <span className="font-mono font-bold text-slate-800">1 EGP = {tx.exchangeRate} SDG</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table (hidden on mobile, visible on lg) */}
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                 <tr>
@@ -242,13 +319,16 @@ export default function SuppliersPage() {
           </div>
         </div>
 
-        {/* TRADE MODAL */}
+        {/* TRADE BOTTOM SHEET / MODAL */}
         {tradeModalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-6 border border-slate-100 text-right">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-lg p-5 sm:p-6 border border-slate-100 text-right max-h-[92vh] overflow-y-auto safe-area-pb">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h3 className="font-black text-slate-900 text-base">تنفيذ عملية تداول عملات مع مورد</h3>
-                <button onClick={() => setTradeModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">
+                <button
+                  onClick={() => setTradeModalOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 text-sm font-bold min-h-[44px] min-w-[44px]"
+                >
                   ✕
                 </button>
               </div>
@@ -260,7 +340,7 @@ export default function SuppliersPage() {
                     value={selectedSupplierId}
                     onChange={(e) => setSelectedSupplierId(e.target.value)}
                     required
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 min-h-[44px]"
                   >
                     {suppliers.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -276,7 +356,7 @@ export default function SuppliersPage() {
                     <button
                       type="button"
                       onClick={() => setTradeType('BUY_SDG_PAY_EGP')}
-                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all min-h-[44px] flex items-center justify-center text-center ${
                         tradeType === 'BUY_SDG_PAY_EGP'
                           ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
                           : 'border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -287,7 +367,7 @@ export default function SuppliersPage() {
                     <button
                       type="button"
                       onClick={() => setTradeType('SELL_SDG_GET_EGP')}
-                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                      className={`p-2.5 rounded-xl border text-xs font-bold transition-all min-h-[44px] flex items-center justify-center text-center ${
                         tradeType === 'SELL_SDG_GET_EGP'
                           ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                           : 'border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -298,27 +378,29 @@ export default function SuppliersPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">المبلغ بالسوداني (SDG)</label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       value={sdgAmount}
                       onChange={(e) => setSdgAmount(e.target.value)}
                       required
                       placeholder="10000000"
-                      className="w-full px-3 py-2 font-mono text-xs font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500"
+                      className="w-full px-3 py-2.5 font-mono text-xs sm:text-sm font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 min-h-[44px]"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">سعر المورد (SDG لكل 1 EGP)</label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       value={rate}
                       onChange={(e) => setRate(e.target.value)}
                       required
                       placeholder="200"
-                      className="w-full px-3 py-2 font-mono text-xs font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500"
+                      className="w-full px-3 py-2.5 font-mono text-xs sm:text-sm font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500 min-h-[44px]"
                     />
                   </div>
                 </div>
@@ -336,18 +418,18 @@ export default function SuppliersPage() {
                   </p>
                 </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setTradeModalOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold"
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={trading}
-                    className="px-6 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 shadow-md shadow-amber-500/20 disabled:opacity-50"
+                    className="w-full sm:w-auto px-6 py-2.5 bg-amber-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-amber-700 shadow-md shadow-amber-500/20 disabled:opacity-50 min-h-[44px]"
                   >
                     {trading ? 'جاري التنفيذ والتسجيل...' : 'تنفيذ وترحيل العملية'}
                   </button>
@@ -357,13 +439,16 @@ export default function SuppliersPage() {
           </div>
         )}
 
-        {/* NEW SUPPLIER MODAL */}
+        {/* NEW SUPPLIER BOTTOM SHEET / MODAL */}
         {newSupplierOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 border border-slate-100 text-right">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-5 sm:p-6 border border-slate-100 text-right max-h-[92vh] overflow-y-auto safe-area-pb">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h3 className="font-black text-slate-900 text-base">إضافة مورد جديد</h3>
-                <button onClick={() => setNewSupplierOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">
+                <button
+                  onClick={() => setNewSupplierOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 text-sm font-bold min-h-[44px] min-w-[44px]"
+                >
                   ✕
                 </button>
               </div>
@@ -377,7 +462,7 @@ export default function SuppliersPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="مثال: شركة النور للتحويلات"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900 min-h-[44px]"
                   />
                 </div>
 
@@ -385,12 +470,13 @@ export default function SuppliersPage() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">رقم الهاتف *</label>
                   <input
                     type="text"
+                    inputMode="tel"
                     required
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="+201200000000"
                     dir="ltr"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900 text-left"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900 text-left min-h-[44px]"
                   />
                 </div>
 
@@ -401,22 +487,22 @@ export default function SuppliersPage() {
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
                     placeholder="وسط البلد - القاهرة"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900 min-h-[44px]"
                   />
                 </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setNewSupplierOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold"
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={savingSupplier}
-                    className="px-6 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 disabled:opacity-50"
+                    className="w-full sm:w-auto px-6 py-2.5 bg-slate-900 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-800 disabled:opacity-50 min-h-[44px]"
                   >
                     {savingSupplier ? 'جاري الحفظ...' : 'حفظ المورد'}
                   </button>

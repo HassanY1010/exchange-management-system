@@ -42,58 +42,59 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 border border-slate-100">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-500/30">
-            <ArrowLeftRight className="w-8 h-8 text-white" />
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-3 sm:p-6 safe-area-pb safe-area-pt">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-5 sm:p-8 border border-slate-100">
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-blue-500/30">
+            <ArrowLeftRight className="w-7 h-7 sm:w-8 sm:h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-black text-slate-900 mb-1">منصة الصرافة والتحويلات المالية</h1>
-          <p className="text-sm text-slate-500">نظام إدارة العملات، إيصالات بنكك والمحاسبة المركزية</p>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 mb-1">منصة الصرافة والتحويلات المالية</h1>
+          <p className="text-xs sm:text-sm text-slate-500">نظام إدارة العملات، إيصالات بنكك والمحاسبة المركزية</p>
         </div>
 
         {error && (
-          <div className="mb-6 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center space-x-2 space-x-reverse text-rose-700 text-sm">
-            <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+          <div className="mb-5 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center space-x-2 space-x-reverse text-rose-700 text-xs sm:text-sm">
+            <ShieldAlert className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">البريد الإلكتروني</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">البريد الإلكتروني</label>
             <div className="relative">
               <input
                 type="email"
+                inputMode="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-sm pl-10"
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-sm sm:text-base pl-10 min-h-[44px]"
                 placeholder="name@exchange.com"
               />
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">كلمة المرور</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">كلمة المرور</label>
             <div className="relative">
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-sm pl-10"
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent text-sm sm:text-base pl-10 min-h-[44px]"
                 placeholder="••••••••"
               />
-              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
             </div>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm shadow-md shadow-blue-500/20 transition-all flex items-center justify-center space-x-2 space-x-reverse disabled:opacity-50"
+            className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-bold text-sm sm:text-base shadow-md shadow-blue-500/20 transition-all flex items-center justify-center space-x-2 space-x-reverse disabled:opacity-50 min-h-[48px]"
           >
             {loading ? (
               <span>جاري التحقق...</span>
@@ -107,26 +108,29 @@ export default function LoginPage() {
         </form>
 
         {/* Quick Demo Access Roles */}
-        <div className="mt-8 pt-6 border-t border-slate-100">
-          <p className="text-xs font-bold text-slate-500 mb-3 text-center">أدوار تجريبية سريعة:</p>
-          <div className="grid grid-cols-3 gap-2">
+        <div className="mt-6 pt-5 border-t border-slate-100">
+          <p className="text-xs font-bold text-slate-500 mb-2.5 text-center">أدوار تجريبية سريعة:</p>
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
             <button
+              type="button"
               onClick={() => quickFill('admin@exchange.com', 'admin123')}
-              className="px-2 py-1.5 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-[11px] font-semibold text-slate-700 transition-colors"
+              className="px-2 py-2 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-[11px] font-semibold text-slate-700 transition-colors min-h-[40px] flex items-center justify-center text-center"
             >
               مدير النظام
             </button>
             <button
+              type="button"
               onClick={() => quickFill('accountant@exchange.com', 'accountant123')}
-              className="px-2 py-1.5 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-[11px] font-semibold text-slate-700 transition-colors"
+              className="px-2 py-2 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-[11px] font-semibold text-slate-700 transition-colors min-h-[40px] flex items-center justify-center text-center"
             >
               المحاسب
             </button>
             <button
+              type="button"
               onClick={() => quickFill('mohammed@exchange.com', 'custody123')}
-              className="px-2 py-1.5 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-[11px] font-semibold text-slate-700 transition-colors"
+              className="px-2 py-2 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-[11px] font-semibold text-slate-700 transition-colors min-h-[40px] flex items-center justify-center text-center"
             >
-              موظف التسليم
+              مسؤول التسليم
             </button>
           </div>
         </div>

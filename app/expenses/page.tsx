@@ -97,16 +97,16 @@ export default function ExpensesPage() {
     <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-black text-slate-900">إدارة المصروفات التشغيلية (Expenses)</h1>
-            <p className="text-sm text-slate-500">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900">إدارة المصروفات التشغيلية (Expenses)</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
               تسجيل وتبويب المصروفات حسب التصنيف، الخصم من الصناديق وإصدار القيود اليومية
             </p>
           </div>
           <button
             onClick={() => setModalOpen(true)}
-            className="flex items-center space-x-2 space-x-reverse bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-rose-500/20 transition-all"
+            className="flex items-center justify-center space-x-2 space-x-reverse bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-rose-500/20 transition-all min-h-[44px]"
           >
             <Plus className="w-4 h-4" />
             <span>تسجيل مصروف جديد</span>
@@ -114,21 +114,65 @@ export default function ExpensesPage() {
         </div>
 
         {/* Expenses Summary Card */}
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex items-center justify-between">
+        <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
             <span className="text-xs font-bold text-slate-500 block mb-1">إجمالي المصروفات التشغيلية المسجلة</span>
-            <div className="text-3xl font-black font-mono text-rose-700">
-              {totalExpenses.toLocaleString()} <span className="text-sm font-normal text-slate-400">EGP</span>
+            <div className="text-2xl sm:text-3xl font-black font-mono text-rose-700">
+              {totalExpenses.toLocaleString()} <span className="text-xs sm:text-sm font-normal text-slate-400">EGP</span>
             </div>
           </div>
-          <div className="text-xs text-slate-400">
+          <div className="text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
             {expenses.length} عملية مصروف مسجلة ومرحلة
           </div>
         </div>
 
-        {/* Expenses Table */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6">
-          <div className="overflow-x-auto">
+        {/* Expenses Section */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-sm sm:text-base text-slate-900">سجل المصروفات التشغيلية</h3>
+            <span className="text-xs text-slate-400 font-mono font-bold">{expenses.length} عملية</span>
+          </div>
+
+          {/* Mobile Cards (< sm) */}
+          <div className="sm:hidden divide-y divide-slate-100 -mx-4">
+            {expenses.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-xs">لا توجد مصروفات مسجلة حتى الآن</div>
+            ) : (
+              expenses.map((exp) => (
+                <div key={exp.id} className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                      {exp.expenseNumber}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                      معتمد ومخصوم
+                    </span>
+                  </div>
+
+                  <div className="flex items-baseline justify-between">
+                    <span className="font-bold text-sm text-slate-900">{exp.category?.name}</span>
+                    <span className="font-mono font-black text-lg text-rose-600">
+                      {exp.amount.toLocaleString()} <span className="text-xs font-normal text-slate-500">{exp.currency}</span>
+                    </span>
+                  </div>
+
+                  {exp.description && (
+                    <div className="text-xs text-slate-600 bg-slate-50 p-2 rounded-xl">
+                      {exp.description}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                    <span className="font-mono">{exp.expenseDate}</span>
+                    <span>بواسطة: {exp.createdBy}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table (hidden on mobile, visible on sm+) */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                 <tr>
@@ -172,13 +216,16 @@ export default function ExpensesPage() {
           </div>
         </div>
 
-        {/* MODAL */}
+        {/* BOTTOM SHEET / MODAL */}
         {modalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 border border-slate-100 text-right">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-5 sm:p-6 border border-slate-100 text-right max-h-[92vh] overflow-y-auto safe-area-pb">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h3 className="font-black text-slate-900 text-base">تسجيل مصروف تشغيلي جديد</h3>
-                <button onClick={() => setModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">
+                <button
+                  onClick={() => setModalOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 text-sm font-bold min-h-[44px] min-w-[44px]"
+                >
                   ✕
                 </button>
               </div>
@@ -190,7 +237,7 @@ export default function ExpensesPage() {
                     value={categoryId}
                     onChange={(e) => setCategoryId(e.target.value)}
                     required
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                   >
                     {categories.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -206,7 +253,7 @@ export default function ExpensesPage() {
                     value={accountId}
                     onChange={(e) => setAccountId(e.target.value)}
                     required
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                   >
                     {accounts.map((a) => (
                       <option key={a.id} value={a.id}>
@@ -216,16 +263,17 @@ export default function ExpensesPage() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">المبلغ (EGP)</label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
                       required
                       placeholder="15000"
-                      className="w-full px-3 py-2 font-mono text-sm font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500"
+                      className="w-full px-3 py-2.5 font-mono text-sm sm:text-base font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500 min-h-[44px]"
                     />
                   </div>
                   <div>
@@ -235,7 +283,7 @@ export default function ExpensesPage() {
                       value={expenseDate}
                       onChange={(e) => setExpenseDate(e.target.value)}
                       required
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                      className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                     />
                   </div>
                 </div>
@@ -247,22 +295,22 @@ export default function ExpensesPage() {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="مثال: فاتورة إيجار المقر لشهر نوفمبر"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500 min-h-[44px]"
                   />
                 </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setModalOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold"
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="px-6 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 disabled:opacity-50"
+                    className="w-full sm:w-auto px-6 py-2.5 bg-rose-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 disabled:opacity-50 min-h-[44px]"
                   >
                     {submitting ? 'جاري الصرف...' : 'تأكيد وصرف المصروف'}
                   </button>

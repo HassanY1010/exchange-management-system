@@ -3,9 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Bell, LogOut, ShieldCheck, Clock, Plus, Upload, CheckCircle2 } from 'lucide-react';
+import { Bell, LogOut, ShieldCheck, Clock, Plus, Upload, CheckCircle2, Menu } from 'lucide-react';
 
-export function Header() {
+interface HeaderProps {
+  onOpenMobileMenu?: () => void;
+}
+
+export function Header({ onOpenMobileMenu }: HeaderProps) {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -28,7 +32,6 @@ export function Header() {
         if (data.success) {
           setUser(data.user);
         } else {
-          // If not authenticated, redirect to login
           router.push('/login');
         }
       })
@@ -52,61 +55,84 @@ export function Header() {
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between sticky top-0 z-10 shadow-sm">
-      {/* Right side: Quick Action Buttons & Clock */}
-      <div className="flex items-center space-x-3 space-x-reverse">
+    <header className="h-16 bg-white border-b border-slate-200 px-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 shadow-sm shrink-0">
+      {/* Right side: Mobile Hamburger + Quick Action Buttons */}
+      <div className="flex items-center space-x-2 sm:space-x-3 space-x-reverse min-w-0">
+        {/* Mobile Hamburger Toggle */}
+        {onOpenMobileMenu && (
+          <button
+            type="button"
+            onClick={onOpenMobileMenu}
+            className="lg:hidden p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0"
+            aria-label="فتح القائمة الجانبية"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+
         <Link
           href="/receipts"
-          className="flex items-center space-x-1.5 space-x-reverse bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all"
+          className="flex items-center space-x-1.5 space-x-reverse bg-blue-600 hover:bg-blue-700 text-white px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold shadow-sm transition-all min-h-[38px] shrink-0"
+          title="رفع إيصالات بنكك"
         >
           <Upload className="w-3.5 h-3.5" />
-          <span>رفع إيصالات بنكك</span>
-        </Link>
-        <Link
-          href="/customer-sessions"
-          className="flex items-center space-x-1.5 space-x-reverse bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>فتح حساب يومي</span>
-        </Link>
-        <Link
-          href="/daily-closing"
-          className="flex items-center space-x-1.5 space-x-reverse bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all"
-        >
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          <span>الإغلاق اليومي</span>
+          <span className="hidden sm:inline">رفع إيصالات</span>
         </Link>
 
-        <div className="hidden lg:flex items-center space-x-2 space-x-reverse bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-medium">
+        <Link
+          href="/customer-sessions"
+          className="flex items-center space-x-1.5 space-x-reverse bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold shadow-sm transition-all min-h-[38px] shrink-0"
+          title="فتح حساب يومي"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">فتح حساب يومي</span>
+        </Link>
+
+        <Link
+          href="/daily-closing"
+          className="hidden sm:flex items-center space-x-1.5 space-x-reverse bg-amber-600 hover:bg-amber-700 text-white px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs font-semibold shadow-sm transition-all min-h-[38px] shrink-0"
+          title="الإغلاق اليومي"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span>الإغلاق</span>
+        </Link>
+
+        <div className="hidden xl:flex items-center space-x-2 space-x-reverse bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-medium">
           <Clock className="w-3.5 h-3.5 text-slate-500" />
           <span dir="ltr">{time}</span>
         </div>
       </div>
 
       {/* Left side: Notifications & User profile */}
-      <div className="flex items-center space-x-4 space-x-reverse">
+      <div className="flex items-center space-x-2 sm:space-x-4 space-x-reverse shrink-0">
         {/* Notification Bell */}
         <div className="relative">
           <button
             onClick={() => setShowNotifications(!showNotifications)}
-            className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg relative transition-colors"
+            className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg relative transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
             title="الإشعارات والتنبيهات"
+            aria-label="الإشعارات والتنبيهات"
           >
             <Bell className="w-5 h-5" />
             {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
+              <span className="absolute top-2 right-2 w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
                 {unreadCount}
               </span>
             )}
           </button>
 
           {showNotifications && (
-            <div className="absolute left-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-50 text-right">
+            <div className="fixed sm:absolute inset-x-2 sm:inset-x-auto sm:left-0 top-16 sm:top-auto sm:mt-2 w-auto sm:w-80 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-50 text-right">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
                 <span className="font-bold text-sm text-slate-900">تنبيهات النظام</span>
-                <span className="text-xs text-blue-600 cursor-pointer">تحديد كمقروء</span>
+                <span
+                  onClick={() => setShowNotifications(false)}
+                  className="text-xs text-blue-600 cursor-pointer p-1"
+                >
+                  إغلاق
+                </span>
               </div>
-              <div className="max-h-64 overflow-y-auto space-y-2">
+              <div className="max-h-64 overflow-y-auto space-y-2 touch-scroll">
                 {notifications.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-4">لا توجد إشعارات جديدة</p>
                 ) : (
@@ -131,26 +157,27 @@ export function Header() {
 
         {/* User Card */}
         {user && (
-          <div className="flex items-center space-x-3 space-x-reverse border-r border-slate-200 pr-4">
+          <div className="flex items-center space-x-2 sm:space-x-3 space-x-reverse border-r border-slate-200 pr-2 sm:pr-4">
             <div className="text-right">
-              <div className="text-xs font-bold text-slate-900">{user.name}</div>
-              <div className="flex items-center space-x-1 space-x-reverse text-[11px] text-blue-600 font-medium">
-                <ShieldCheck className="w-3 h-3" />
-                <span>
+              <div className="text-xs font-bold text-slate-900 truncate max-w-[90px] sm:max-w-[130px]">{user.name}</div>
+              <div className="hidden sm:flex items-center space-x-1 space-x-reverse text-[11px] text-blue-600 font-medium">
+                <ShieldCheck className="w-3 h-3 shrink-0" />
+                <span className="truncate">
                   {user.role === 'admin'
                     ? 'مدير النظام'
                     : user.role === 'accountant'
                     ? 'محاسب مالي'
                     : user.role === 'custody_officer'
-                    ? 'مسؤول تسليم نقدية'
+                    ? 'مسؤول تسليم'
                     : 'مدخل بيانات'}
                 </span>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
               title="تسجيل الخروج"
+              aria-label="تسجيل الخروج"
             >
               <LogOut className="w-4 h-4" />
             </button>

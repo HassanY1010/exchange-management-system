@@ -68,16 +68,16 @@ export default function ExchangeRatesPage() {
     <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-black text-slate-900">إدارة أسعار الصرف اليومية (Exchange Rates)</h1>
-            <p className="text-sm text-slate-500">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900">إدارة أسعار الصرف اليومية (Exchange Rates)</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
               تحديد أسعار تعامل العملاء، أسعار الموردين، والأسعار المرجعية مع الاحتفاظ بالسجل التاريخي
             </p>
           </div>
           <button
             onClick={() => setModalOpen(true)}
-            className="flex items-center space-x-2 space-x-reverse bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
+            className="flex items-center justify-center space-x-2 space-x-reverse bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 transition-all min-h-[44px]"
           >
             <Plus className="w-4 h-4" />
             <span>تحديث / إضافة سعر صرف جديد</span>
@@ -85,7 +85,7 @@ export default function ExchangeRatesPage() {
         </div>
 
         {/* Current Active Rates Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
           {['customer', 'supplier', 'market_benchmark'].map((typeKey) => {
             const currentRate = rates.find((r) => r.rateType === typeKey);
             const label =
@@ -98,30 +98,71 @@ export default function ExchangeRatesPage() {
             return (
               <div
                 key={typeKey}
-                className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col justify-between"
+                onClick={() => {
+                  setRateType(typeKey);
+                  if (currentRate?.rate) setRate(currentRate.rate);
+                  setModalOpen(true);
+                }}
+                className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 p-4 sm:p-5 shadow-sm flex flex-col justify-between cursor-pointer hover:border-blue-400 active:scale-[0.99] transition-all"
               >
                 <div>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-slate-500">{label}</span>
                     <TrendingUp className="w-4 h-4 text-blue-600" />
                   </div>
-                  <div className="text-2xl font-black font-mono text-slate-900 mb-1">
+                  <div className="text-2xl sm:text-3xl font-black font-mono text-slate-900 mb-1">
                     1 EGP = {currentRate ? currentRate.rate : 200} <span className="text-xs font-normal text-slate-400">SDG</span>
                   </div>
                 </div>
-                <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-100 flex items-center justify-between">
+                <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-100 flex items-center justify-between mt-2">
                   <span>بواسطة: {currentRate?.createdBy || 'النظام'}</span>
-                  <Clock className="w-3 h-3 text-slate-400" />
+                  <span className="text-blue-600 font-bold hover:underline">تعديل &larr;</span>
                 </div>
               </div>
             );
           })}
         </div>
 
-        {/* Rates History Table */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6">
-          <h3 className="font-bold text-sm text-slate-900 mb-4">سجل أسعار الصرف التاريخية</h3>
-          <div className="overflow-x-auto">
+        {/* Rates History Section */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-sm sm:text-base text-slate-900">سجل أسعار الصرف التاريخية</h3>
+            <span className="text-xs text-slate-400 font-mono font-bold">{rates.length} تسجيل</span>
+          </div>
+
+          {/* Mobile Cards (< sm) */}
+          <div className="sm:hidden divide-y divide-slate-100 -mx-4">
+            {rates.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-xs">لا يوجد سجل تاريخي حتى الآن</div>
+            ) : (
+              rates.map((r) => (
+                <div key={r.id} className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                      {r.fromCurrency} / {r.toCurrency}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700">
+                      {r.rateType === 'customer' ? 'عملاء' : r.rateType === 'supplier' ? 'موردين' : 'مرجعي'}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="font-mono font-black text-lg text-slate-900">
+                      1 {r.fromCurrency} = {r.rate} {r.toCurrency}
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      {new Date(r.createdAt).toLocaleDateString('ar-EG')}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    بواسطة: <span className="font-semibold text-slate-700">{r.createdBy || 'النظام'}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Desktop Table (hidden on mobile, visible on sm+) */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                 <tr>
@@ -157,13 +198,16 @@ export default function ExchangeRatesPage() {
           </div>
         </div>
 
-        {/* MODAL */}
+        {/* BOTTOM SHEET / MODAL */}
         {modalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 border border-slate-100 text-right">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-5 sm:p-6 border border-slate-100 text-right max-h-[92vh] overflow-y-auto safe-area-pb">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h3 className="font-black text-slate-900 text-base">إضافة سعر صرف جديد</h3>
-                <button onClick={() => setModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">
+                <button
+                  onClick={() => setModalOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 text-sm font-bold min-h-[44px] min-w-[44px]"
+                >
                   ✕
                 </button>
               </div>
@@ -176,7 +220,7 @@ export default function ExchangeRatesPage() {
                       type="text"
                       disabled
                       value={fromCurrency}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-100 font-bold"
+                      className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-slate-100 font-bold min-h-[44px]"
                     />
                   </div>
                   <div>
@@ -185,7 +229,7 @@ export default function ExchangeRatesPage() {
                       type="text"
                       disabled
                       value={toCurrency}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-100 font-bold"
+                      className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 bg-slate-100 font-bold min-h-[44px]"
                     />
                   </div>
                 </div>
@@ -195,7 +239,7 @@ export default function ExchangeRatesPage() {
                   <select
                     value={rateType}
                     onChange={(e) => setRateType(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                   >
                     <option value="customer">سعر العملاء (Customer Rate)</option>
                     <option value="supplier">سعر الموردين (Supplier Rate)</option>
@@ -207,11 +251,12 @@ export default function ExchangeRatesPage() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">سعر الصرف (قيمة 1 EGP بالسوداني)</label>
                   <input
                     type="number"
+                    inputMode="decimal"
                     value={rate}
                     onChange={(e) => setRate(e.target.value)}
                     required
                     placeholder="200"
-                    className="w-full px-3 py-2 font-mono text-sm font-black rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2.5 font-mono text-sm sm:text-base font-black rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                   />
                 </div>
 
@@ -219,18 +264,18 @@ export default function ExchangeRatesPage() {
                   ملاحظة أمان: تغيير سعر الصرف يطبق فقط على العمليات الجديدة، ولن يتم تعديل أي عمليات قديمة مسجلة.
                 </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setModalOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold"
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={saving}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 disabled:opacity-50"
+                    className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 disabled:opacity-50 min-h-[44px]"
                   >
                     {saving ? 'جاري الحفظ...' : 'تثبيت السعر الجديد'}
                   </button>

@@ -125,25 +125,112 @@ export default function DebtsPage() {
     <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-black text-slate-900">إدارة الديون والالتزامات (Debt Management)</h1>
-            <p className="text-sm text-slate-500">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900">إدارة الديون والالتزامات (Debt Management)</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
               متابعة مديونيات العملاء والموردين، تسجيل دفعات السداد الجزئي، والاحتفاظ بسجل السداد الكامل
             </p>
           </div>
           <button
             onClick={() => setNewDebtOpen(true)}
-            className="flex items-center space-x-2 space-x-reverse bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md transition-all"
+            className="flex items-center justify-center space-x-2 space-x-reverse bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md transition-all min-h-[44px]"
           >
             <Plus className="w-4 h-4" />
             <span>تسجيل مديونية جديدة</span>
           </button>
         </div>
 
-        {/* Debts Table */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6">
-          <div className="overflow-x-auto">
+        {/* Debts Section */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="font-bold text-sm sm:text-base text-slate-900">سجل الديون والمديونيات</h3>
+            <span className="text-xs text-slate-400 font-mono font-bold">{debts.length} قيد</span>
+          </div>
+
+          {/* Mobile Cards (< lg) */}
+          <div className="lg:hidden divide-y divide-slate-100">
+            {debts.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-xs">لا توجد ديون أو مديونيات مسجلة</div>
+            ) : (
+              debts.map((d) => {
+                const paidAmount = d.originalAmount - d.remainingAmount;
+                return (
+                  <div key={d.id} className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                          {d.debtNumber}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                          {d.debtorType === 'customer' ? 'عميل' : d.debtorType === 'supplier' ? 'مورد' : 'موظف'}
+                        </span>
+                      </div>
+                      <div>
+                        {d.status === 'paid' && (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            مسدد بالكامل
+                          </span>
+                        )}
+                        {d.status === 'partially_paid' && (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                            مدفوع جزئياً
+                          </span>
+                        )}
+                        {d.status === 'outstanding' && (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                            مستحق
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-baseline justify-between">
+                      <span className="font-bold text-base text-slate-900">{d.debtorId}</span>
+                      <span className="text-[11px] font-mono text-slate-400">{d.debtDate}</span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl text-xs text-center">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">المبلغ الأصلي</span>
+                        <span className="font-mono font-bold text-slate-700">
+                          {d.originalAmount.toLocaleString()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">المسدد</span>
+                        <span className="font-mono font-bold text-emerald-600">
+                          {paidAmount.toLocaleString()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">المتبقي</span>
+                        <span className="font-mono font-black text-rose-600">
+                          {d.remainingAmount.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    {d.status !== 'paid' && (
+                      <button
+                        onClick={() => {
+                          setActiveDebt(d);
+                          setPayAmount(d.remainingAmount);
+                          setPayModalOpen(true);
+                        }}
+                        className="w-full py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-xl text-xs sm:text-sm min-h-[44px] flex items-center justify-center transition-colors"
+                      >
+                        تسجيل دفعة سداد
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop Table (hidden on mobile, visible on lg) */}
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                 <tr>
@@ -227,13 +314,16 @@ export default function DebtsPage() {
           </div>
         </div>
 
-        {/* PAY DEBT MODAL */}
+        {/* PAY DEBT BOTTOM SHEET / MODAL */}
         {payModalOpen && activeDebt && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 border border-slate-100 text-right">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-5 sm:p-6 border border-slate-100 text-right max-h-[92vh] overflow-y-auto safe-area-pb">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h3 className="font-black text-slate-900 text-base">تسجيل دفعة سداد دين</h3>
-                <button onClick={() => setPayModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">
+                <button
+                  onClick={() => setPayModalOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 text-sm font-bold min-h-[44px] min-w-[44px]"
+                >
                   ✕
                 </button>
               </div>
@@ -250,7 +340,7 @@ export default function DebtsPage() {
                     value={payAccountId}
                     onChange={(e) => setPayAccountId(e.target.value)}
                     required
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                   >
                     {accounts.map((a) => (
                       <option key={a.id} value={a.id}>
@@ -264,26 +354,27 @@ export default function DebtsPage() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">المبلغ المسدد ({activeDebt.currency})</label>
                   <input
                     type="number"
+                    inputMode="decimal"
                     value={payAmount}
                     onChange={(e) => setPayAmount(e.target.value)}
                     required
                     max={activeDebt.remainingAmount}
-                    className="w-full px-3 py-2 font-mono text-sm font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2.5 font-mono text-sm sm:text-base font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 min-h-[44px]"
                   />
                 </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setPayModalOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold"
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={paying}
-                    className="px-6 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-md shadow-emerald-500/20 disabled:opacity-50"
+                    className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-emerald-700 shadow-md shadow-emerald-500/20 disabled:opacity-50 min-h-[44px]"
                   >
                     {paying ? 'جاري السداد...' : 'تأكيد تسجيل السداد'}
                   </button>
@@ -293,25 +384,28 @@ export default function DebtsPage() {
           </div>
         )}
 
-        {/* NEW DEBT MODAL */}
+        {/* NEW DEBT BOTTOM SHEET / MODAL */}
         {newDebtOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 border border-slate-100 text-right">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-5 sm:p-6 border border-slate-100 text-right max-h-[92vh] overflow-y-auto safe-area-pb">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h3 className="font-black text-slate-900 text-base">تسجيل مديونية جديدة</h3>
-                <button onClick={() => setNewDebtOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">
+                <button
+                  onClick={() => setNewDebtOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 text-sm font-bold min-h-[44px] min-w-[44px]"
+                >
                   ✕
                 </button>
               </div>
 
               <form onSubmit={handleCreateDebt} className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">صفة الطرف</label>
                     <select
                       value={debtorType}
                       onChange={(e) => setDebtorType(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                      className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                     >
                       <option value="customer">عميل (Customer)</option>
                       <option value="supplier">مورد (Supplier)</option>
@@ -326,21 +420,22 @@ export default function DebtsPage() {
                       value={debtorName}
                       onChange={(e) => setDebtorName(e.target.value)}
                       placeholder="اسم العميل أو المورد"
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                      className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">المبلغ</label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       required
                       value={originalAmount}
                       onChange={(e) => setOriginalAmount(e.target.value)}
                       placeholder="1000000"
-                      className="w-full px-3 py-2 font-mono text-xs font-bold rounded-xl border border-slate-200"
+                      className="w-full px-3 py-2.5 font-mono text-xs sm:text-sm font-bold rounded-xl border border-slate-200 min-h-[44px]"
                     />
                   </div>
                   <div>
@@ -348,7 +443,7 @@ export default function DebtsPage() {
                     <select
                       value={currency}
                       onChange={(e) => setCurrency(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 font-bold"
+                      className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 font-bold min-h-[44px]"
                     >
                       <option value="SDG">جنيه سوداني (SDG)</option>
                       <option value="EGP">جنيه مصري (EGP)</option>
@@ -363,7 +458,7 @@ export default function DebtsPage() {
                     type="date"
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                   />
                 </div>
 
@@ -374,22 +469,22 @@ export default function DebtsPage() {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="مثال: متبقي تحويل غير مكتمل للعميل"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 min-h-[44px]"
                   />
                 </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setNewDebtOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold"
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={savingDebt}
-                    className="px-6 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 disabled:opacity-50"
+                    className="w-full sm:w-auto px-6 py-2.5 bg-slate-900 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-800 disabled:opacity-50 min-h-[44px]"
                   >
                     {savingDebt ? 'جاري الحفظ...' : 'حفظ المديونية'}
                   </button>

@@ -134,86 +134,139 @@ export default function DailyClosingPage() {
     <DashboardLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-black text-slate-900">الإغلاق اليومي ومطابقة الخزائن (Daily Closing)</h1>
-            <p className="text-sm text-slate-500">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900">الإغلاق اليومي ومطابقة الخزائن (Daily Closing)</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
               مطابقة النقدية الفعلية مع السجل المحاسبي، رصد الفروقات (عجز/فائض)، وتثبيت أرصدة نهاية اليوم
             </p>
           </div>
           <button
             onClick={fetchPreview}
-            className="flex items-center space-x-1.5 space-x-reverse bg-white border border-slate-200 text-slate-700 px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-slate-50 self-start md:self-auto"
+            className="flex items-center justify-center space-x-1.5 space-x-reverse bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-50 min-h-[44px] shadow-sm"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             <span>تحديث المعاينة</span>
           </button>
         </div>
 
         {message && (
-          <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-900 flex items-center space-x-2 space-x-reverse text-xs font-bold">
+          <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-900 flex items-center space-x-2 space-x-reverse text-xs sm:text-sm font-bold">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
             <span>{message}</span>
           </div>
         )}
 
-        {/* Variances Summary Cards (Page 31) */}
+        {/* Variances Summary Cards */}
         {recon && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
               <span className="text-xs text-slate-500 font-bold block mb-1">المتوقع محاسبياً (EGP)</span>
-              <span className="text-xl font-black font-mono text-slate-900">
+              <span className="text-lg sm:text-xl font-black font-mono text-slate-900">
                 {recon.totalExpectedEgp.toLocaleString()} EGP
               </span>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200">
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
               <span className="text-xs text-slate-500 font-bold block mb-1">الفعلي المحسوب (EGP)</span>
-              <span className="text-xl font-black font-mono text-slate-900">
+              <span className="text-lg sm:text-xl font-black font-mono text-slate-900">
                 {recon.totalActualEgp.toLocaleString()} EGP
               </span>
             </div>
 
-            <div className={`p-5 rounded-2xl border ${
+            <div className={`p-4 sm:p-5 rounded-2xl border shadow-sm ${
               recon.totalDiffEgp === 0
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                 : 'bg-rose-50 border-rose-200 text-rose-900'
             }`}>
               <span className="text-xs font-bold block mb-1">فرق الجنيه المصري (Variance EGP)</span>
-              <span className="text-xl font-black font-mono">
+              <span className="text-lg sm:text-xl font-black font-mono">
                 {recon.totalDiffEgp > 0 ? `+${recon.totalDiffEgp.toLocaleString()}` : recon.totalDiffEgp.toLocaleString()} EGP
               </span>
-              <span className="text-[10px] block mt-1">
+              <span className="text-[10px] block mt-1 font-bold">
                 {recon.totalDiffEgp === 0 ? '✓ مطابق تماماً' : recon.totalDiffEgp > 0 ? 'فائض نقدي' : 'عجز نقدي'}
               </span>
             </div>
 
-            <div className={`p-5 rounded-2xl border ${
+            <div className={`p-4 sm:p-5 rounded-2xl border shadow-sm ${
               recon.totalDiffSdg === 0
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                 : 'bg-rose-50 border-rose-200 text-rose-900'
             }`}>
               <span className="text-xs font-bold block mb-1">فرق الجنيه السوداني (Variance SDG)</span>
-              <span className="text-xl font-black font-mono">
+              <span className="text-lg sm:text-xl font-black font-mono">
                 {recon.totalDiffSdg > 0 ? `+${recon.totalDiffSdg.toLocaleString()}` : recon.totalDiffSdg.toLocaleString()} SDG
               </span>
-              <span className="text-[10px] block mt-1">
+              <span className="text-[10px] block mt-1 font-bold">
                 {recon.totalDiffSdg === 0 ? '✓ مطابق تماماً' : 'يوجد اختلاف في حساب بنكك/الكاش'}
               </span>
             </div>
           </div>
         )}
 
-        {/* Detailed Accounts Reconciliation Table */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6">
+        {/* Detailed Accounts Reconciliation Section */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-4 sm:p-6">
           <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
             <div>
-              <h3 className="font-black text-slate-900 text-base">جدول جرد ومطابقة أرصدة الصناديق والخزائن</h3>
-              <p className="text-xs text-slate-500">أدخل المبالغ الفعلية المعدودة في الخزائن لمطابقتها مع السجل المالي</p>
+              <h3 className="font-black text-slate-900 text-base sm:text-lg">جدول جرد ومطابقة أرصدة الصناديق والخزائن</h3>
+              <p className="text-xs text-slate-500 mt-0.5">أدخل المبالغ الفعلية المعدودة في الخزائن لمطابقتها مع السجل المالي</p>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Reconciliation Cards (< lg) */}
+          <div className="lg:hidden space-y-3">
+            {accounts.map((acc: any) => (
+              <div key={acc.accountId} className="p-4 bg-slate-50/70 border border-slate-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sm text-slate-900">{acc.accountName}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                      {acc.currency}
+                    </span>
+                    {acc.isBalanced ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        مطابق
+                      </span>
+                    ) : (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        acc.status === 'deficit' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {acc.status === 'deficit' ? 'عجز' : 'فائض'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">المتوقع دفترياً</span>
+                    <span className="font-mono font-black text-slate-900">{acc.expectedBalance.toLocaleString()} {acc.currency}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">الفرق الفعلي</span>
+                    <span className={`font-mono font-black ${acc.difference === 0 ? 'text-slate-500' : acc.difference > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {acc.difference > 0 ? `+${acc.difference.toLocaleString()}` : acc.difference.toLocaleString()} {acc.currency}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">الرصيد الفعلي المعدود في الخزينة:</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    defaultValue={acc.actualCountedBalance}
+                    onBlur={(e) => handleCountedChange(acc.accountId, e.target.value)}
+                    className="w-full px-3 py-2.5 font-mono text-sm sm:text-base font-bold rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-amber-500 min-h-[44px]"
+                    placeholder={acc.expectedBalance.toString()}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table (hidden on mobile, visible on lg) */}
+          <div className="hidden lg:block overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                 <tr>
@@ -236,6 +289,7 @@ export default function DailyClosingPage() {
                     <td className="p-3">
                       <input
                         type="number"
+                        inputMode="decimal"
                         defaultValue={acc.actualCountedBalance}
                         onBlur={(e) => handleCountedChange(acc.accountId, e.target.value)}
                         className="w-full px-3 py-1.5 font-mono text-xs font-bold rounded-lg border border-slate-300 focus:ring-2 focus:ring-amber-500"
@@ -277,18 +331,18 @@ export default function DailyClosingPage() {
                 value={closingNotes}
                 onChange={(e) => setClosingNotes(e.target.value)}
                 placeholder="أدخل أي ملاحظات تخص تسوية اليوم أو إثبات أسباب العجز أو الفائض..."
-                className="w-full p-2.5 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500"
+                className="w-full p-3 text-xs sm:text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-amber-500"
               />
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               <div className="text-xs text-slate-500">
                 عند الإغلاق: يتم تجميد حركات اليوم المالي، وتثبيت أرصدة الخزائن تلقائياً.
               </div>
               <button
                 onClick={handleExecuteClosing}
                 disabled={submitting}
-                className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-lg shadow-amber-600/20 transition-all flex items-center space-x-2 space-x-reverse disabled:opacity-50"
+                className="w-full sm:w-auto px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-lg shadow-amber-600/20 transition-all flex items-center justify-center space-x-2 space-x-reverse disabled:opacity-50 min-h-[48px]"
               >
                 <Lock className="w-4 h-4" />
                 <span>{submitting ? 'جاري تثبيت الإغلاق...' : 'تثبيت وإغلاق اليوم المالي الآن'}</span>
@@ -298,20 +352,20 @@ export default function DailyClosingPage() {
         </div>
 
         {/* Previous Closings Log */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 overflow-hidden">
-          <h3 className="font-bold text-sm text-slate-900 mb-3">سجل الإغلاقات اليومية التاريخية</h3>
+        <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden">
+          <h3 className="font-bold text-sm sm:text-base text-slate-900 mb-3">سجل الإغلاقات اليومية التاريخية</h3>
           <div className="divide-y divide-slate-100 text-xs">
             {closings.length === 0 ? (
               <p className="text-slate-400 py-4 text-center">لا توجد إغلاقات سابقة مسجلة</p>
             ) : (
               closings.map((c) => (
-                <div key={c.id} className="py-3 flex items-center justify-between">
+                <div key={c.id} className="py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                   <div>
                     <span className="font-mono font-bold text-slate-900 text-sm ml-2">{c.businessDate}</span>
                     <span className="text-slate-500">بواسطة: {c.closedBy || 'المدير'}</span>
                     {c.notes && <span className="text-slate-400 block text-[11px] mt-0.5">{c.notes}</span>}
                   </div>
-                  <div className="flex items-center space-x-2 space-x-reverse">
+                  <div className="flex items-center space-x-2 space-x-reverse self-end sm:self-auto">
                     <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
                       c.status === 'closed' ? 'bg-slate-100 text-slate-700' : 'bg-emerald-100 text-emerald-800'
                     }`}>
@@ -323,7 +377,7 @@ export default function DailyClosingPage() {
                           setSelectedClosingId(c.id);
                           setReopenModalOpen(true);
                         }}
-                        className="px-3 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold rounded-lg text-xs"
+                        className="px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold rounded-lg text-xs min-h-[36px]"
                       >
                         إعادة فتح اليوم
                       </button>
@@ -335,13 +389,16 @@ export default function DailyClosingPage() {
           </div>
         </div>
 
-        {/* REOPEN MODAL */}
+        {/* REOPEN BOTTOM SHEET / MODAL */}
         {reopenModalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 border border-slate-100 text-right">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-5 sm:p-6 border border-slate-100 text-right max-h-[92vh] overflow-y-auto safe-area-pb">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h3 className="font-black text-slate-900 text-base">إعادة فتح اليوم المالي</h3>
-                <button onClick={() => setReopenModalOpen(false)} className="text-slate-400 hover:text-slate-600 text-lg font-bold">
+                <button
+                  onClick={() => setReopenModalOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 text-sm font-bold min-h-[44px] min-w-[44px]"
+                >
                   ✕
                 </button>
               </div>
@@ -357,25 +414,25 @@ export default function DailyClosingPage() {
                     value={reopenReason}
                     onChange={(e) => setReopenReason(e.target.value)}
                     placeholder="مثال: تصحيح تسليم إيصال متأخر بموافقة الإدارة..."
-                    className="w-full p-2.5 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500"
+                    className="w-full p-3 text-xs sm:text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500 min-h-[80px]"
                   />
                   <p className="text-[11px] text-slate-400 mt-1">
                     سيتم تدوين اسم المستخدم والتاريخ والسبب في سجل التدقيق الرقابي غير القابل للحذف.
                   </p>
                 </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setReopenModalOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold"
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={reopening}
-                    className="px-6 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 disabled:opacity-50"
+                    className="w-full sm:w-auto px-6 py-2.5 bg-rose-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 disabled:opacity-50 min-h-[44px]"
                   >
                     {reopening ? 'جاري الفتح...' : 'تأكيد إعادة الفتح'}
                   </button>

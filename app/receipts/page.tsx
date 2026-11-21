@@ -16,6 +16,8 @@ import {
   User,
   Calendar,
   Layers,
+  X,
+  ChevronLeft,
 } from 'lucide-react';
 
 export default function ReceiptsPage() {
@@ -34,7 +36,7 @@ export default function ReceiptsPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
 
-  // Side-by-side Review Modal State
+  // Review Modal State
   const [reviewReceipt, setReviewReceipt] = useState<any>(null);
   const [editTxnId, setEditTxnId] = useState('');
   const [editAmount, setEditAmount] = useState<number | string>('');
@@ -60,7 +62,6 @@ export default function ReceiptsPage() {
   useEffect(() => {
     fetchReceipts();
 
-    // Fetch customers & open sessions for linking
     fetch('/api/v1/customers')
       .then((res) => res.json())
       .then((data) => {
@@ -81,8 +82,6 @@ export default function ReceiptsPage() {
     setUploadMessage('');
 
     try {
-      // Split pasted or formatted receipts text
-      // If user inputs multiple receipts or single text
       const rawTextBlocks = batchReceiptsText.split(/\n\s*---\s*\n|\n\s*===\s*\n/);
       const items = rawTextBlocks.map((block, idx) => {
         return {
@@ -175,29 +174,64 @@ export default function ReceiptsPage() {
     }
   };
 
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'approved':
+        return (
+          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+            <CheckCircle className="w-3 h-3 text-emerald-600" />
+            <span>معتمد</span>
+          </span>
+        );
+      case 'duplicate':
+        return (
+          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 animate-pulse">
+            <AlertTriangle className="w-3 h-3 text-rose-600" />
+            <span>إيصال مكرر!</span>
+          </span>
+        );
+      case 'pending_review':
+        return (
+          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
+            <span>بانتظار المراجعة</span>
+          </span>
+        );
+      case 'rejected':
+        return (
+          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600">
+            <XCircle className="w-3 h-3 text-slate-500" />
+            <span>مرفوض</span>
+          </span>
+        );
+      default:
+        return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">{status}</span>;
+    }
+  };
+
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6 max-w-full">
         {/* Page Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-black text-slate-900">إدارة إيصالات بنكك والتحقق الذكي (OCR)</h1>
-            <p className="text-sm text-slate-500">
-              رفع الإيصالات دفعة واحدة، فك النصوص تلقائياً، كشف الإيصالات المكررة واعتمادها مالياً
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 leading-tight">إدارة إيصالات بنكك والـ OCR</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+              رفع الإيصالات، فك النصوص تلقائياً، كشف التكرار والاعتماد المالي
             </p>
           </div>
-          <div className="flex items-center space-x-2 space-x-reverse">
+          <div className="flex items-center space-x-2 space-x-reverse self-stretch sm:self-auto">
             <button
               onClick={() => setUploadModalOpen(true)}
-              className="flex items-center space-x-2 space-x-reverse bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all"
+              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 space-x-reverse bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 transition-all min-h-[44px]"
             >
               <Upload className="w-4 h-4" />
-              <span>رفع إيصالات دفعة واحدة (Batch Upload)</span>
+              <span>رفع إيصالات دفعة واحدة</span>
             </button>
             <button
               onClick={fetchReceipts}
-              className="p-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50"
+              className="p-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
               title="تحديث"
+              aria-label="تحديث الإيصالات"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -205,39 +239,39 @@ export default function ReceiptsPage() {
         </div>
 
         {/* Filters & Search Toolbar */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center space-x-2 space-x-reverse flex-1 max-w-md">
+        <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center space-x-2 space-x-reverse w-full md:max-w-md">
             <div className="relative w-full">
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && fetchReceipts()}
-                placeholder="بحث برقم العملية، اسم المرسل، أو المستفيد..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="بحث برقم العملية، المرسل، أو المستفيد..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
               />
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
             </div>
             <button
               onClick={fetchReceipts}
-              className="px-3.5 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800"
+              className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs sm:text-sm font-semibold hover:bg-slate-800 min-h-[44px] shrink-0"
             >
               بحث
             </button>
           </div>
 
-          <div className="flex items-center space-x-2 space-x-reverse overflow-x-auto pb-1 md:pb-0">
+          <div className="flex items-center space-x-1.5 space-x-reverse overflow-x-auto touch-scroll pb-1 md:pb-0">
             {[
-              { id: '', label: 'جميع الإيصالات' },
+              { id: '', label: 'الكل' },
               { id: 'pending_review', label: 'بانتظار المراجعة' },
               { id: 'approved', label: 'معتمدة' },
-              { id: 'duplicate', label: 'مكررة (تحذير)' },
+              { id: 'duplicate', label: 'مكررة' },
               { id: 'rejected', label: 'مرفوضة' },
             ].map((btn) => (
               <button
                 key={btn.id}
                 onClick={() => setStatusFilter(btn.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all min-h-[38px] ${
                   statusFilter === btn.id
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -249,8 +283,76 @@ export default function ReceiptsPage() {
           </div>
         </div>
 
-        {/* Receipts Data Table */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {/* 1. MOBILE CARDS VIEW: (Visible on screens < 1024px) */}
+        <div className="lg:hidden space-y-3">
+          {receipts.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400 text-xs sm:text-sm">
+              {loading ? 'جاري تحميل الإيصالات...' : 'لا توجد إيصالات تطابق البحث'}
+            </div>
+          ) : (
+            receipts.map((rcp) => (
+              <div
+                key={rcp.id}
+                onClick={() => openReview(rcp)}
+                className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm active:bg-slate-50 transition-colors flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-mono text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg text-slate-800">
+                    {rcp.receiptNumber}
+                  </span>
+                  <div>{getStatusBadge(rcp.status)}</div>
+                </div>
+
+                <div className="flex items-baseline justify-between mb-2">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">رقم العملية (Bankak TXN):</span>
+                    <span className="font-mono font-bold text-sm text-blue-700">{rcp.transactionId}</span>
+                  </div>
+                  <div className="text-left">
+                    <span className="text-[10px] text-slate-400 block">المبلغ:</span>
+                    <span className="font-mono font-black text-base text-slate-900">
+                      {rcp.amount.toLocaleString()} <span className="text-xs text-slate-400 font-normal">SDG</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl mb-3 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">المرسل:</span>
+                    <span className="font-medium text-slate-800 truncate block">{rcp.senderName || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">العميل المرتبط:</span>
+                    <span className="font-medium text-blue-700 truncate block">{rcp.customer?.name || 'عام'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">التاريخ:</span>
+                    <span className="font-mono text-slate-600 text-[11px]">{rcp.transactionDate} {rcp.transactionTime}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">دقة الـ OCR:</span>
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                      rcp.ocrConfidence >= 80 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {rcp.ocrConfidence}%
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center justify-center space-x-1 space-x-reverse min-h-[40px]"
+                >
+                  <Eye className="w-4 h-4" />
+                  <span>معاينة وتدقيق الإيصال</span>
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* 2. DESKTOP VIEW: Data Table (Visible on screens >= 1024px) */}
+        <div className="hidden lg:block bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
@@ -293,35 +395,11 @@ export default function ReceiptsPage() {
                           {rcp.ocrConfidence}%
                         </span>
                       </td>
-                      <td className="p-3.5">
-                        {rcp.status === 'approved' && (
-                          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
-                            <CheckCircle className="w-3 h-3 text-emerald-600" />
-                            <span>معتمد</span>
-                          </span>
-                        )}
-                        {rcp.status === 'duplicate' && (
-                          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 animate-pulse">
-                            <AlertTriangle className="w-3 h-3 text-rose-600" />
-                            <span>إيصال مكرر!</span>
-                          </span>
-                        )}
-                        {rcp.status === 'pending_review' && (
-                          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800">
-                            <span>بانتظار المراجعة</span>
-                          </span>
-                        )}
-                        {rcp.status === 'rejected' && (
-                          <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600">
-                            <XCircle className="w-3 h-3 text-slate-500" />
-                            <span>مرفوض</span>
-                          </span>
-                        )}
-                      </td>
+                      <td className="p-3.5">{getStatusBadge(rcp.status)}</td>
                       <td className="p-3.5 text-center">
                         <button
                           onClick={() => openReview(rcp)}
-                          className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-xs transition-colors flex items-center justify-center space-x-1 space-x-reverse mx-auto"
+                          className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-xs transition-colors flex items-center justify-center space-x-1 space-x-reverse mx-auto"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>معاينة واعتماد</span>
@@ -335,25 +413,25 @@ export default function ReceiptsPage() {
           </div>
         </div>
 
-        {/* BATCH UPLOAD MODAL */}
+        {/* BATCH UPLOAD MODAL / BOTTOM SHEET */}
         {uploadModalOpen && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-6 border border-slate-100 text-right">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
-                <div className="flex items-center space-x-2.5 space-x-reverse">
-                  <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
+            <div className="bg-white w-full sm:max-w-2xl max-h-[92vh] overflow-y-auto touch-scroll rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 text-right safe-area-pb">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+                <div className="flex items-center space-x-2.5 space-x-reverse min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
                     <Upload className="w-5 h-5" />
                   </div>
-                  <div>
-                    <h3 className="font-black text-slate-900 text-base">رفع إيصالات بنكك دفعة واحدة</h3>
-                    <p className="text-xs text-slate-500">معالجة فورية بواسطة OCR، استخراج المبالغ ومنع التكرار</p>
+                  <div className="min-w-0">
+                    <h3 className="font-black text-slate-900 text-sm sm:text-base truncate">رفع إيصالات بنكك دفعة واحدة</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 truncate">معالجة فورية بواسطة OCR، استخراج المبالغ ومنع التكرار</p>
                   </div>
                 </div>
                 <button
                   onClick={() => setUploadModalOpen(false)}
-                  className="text-slate-400 hover:text-slate-600 text-lg font-bold p-1"
+                  className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
-                  ✕
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
@@ -364,13 +442,13 @@ export default function ReceiptsPage() {
               )}
 
               <form onSubmit={handleBatchUpload} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">ربط بعميل (اختياري)</label>
                     <select
                       value={selectedCustomerId}
                       onChange={(e) => setSelectedCustomerId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                     >
                       <option value="">بدون تحديد عميل (عام)</option>
                       {customers.map((c) => (
@@ -386,7 +464,7 @@ export default function ReceiptsPage() {
                     <select
                       value={selectedSessionId}
                       onChange={(e) => setSelectedSessionId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                     >
                       <option value="">بدون ربط بجلسة محددة</option>
                       {sessions.map((s) => (
@@ -399,7 +477,7 @@ export default function ReceiptsPage() {
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-1 gap-1">
                     <label className="block text-xs font-bold text-slate-700">
                       نصوص إيصالات بنكك (أو لصق إشعارات متعددة مفصولة بـ ---)
                     </label>
@@ -410,18 +488,18 @@ export default function ReceiptsPage() {
                           `Bank of Khartoum\nTransaction ID: 123456789\nAmount: 5,000,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 10:15:00\n---\nBank of Khartoum\nTransaction ID: 987654321\nAmount: 3,000,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 10:25:00\n---\nBank of Khartoum\nTransaction ID: 554433221\nAmount: 7,000,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 10:40:00\n---\nBank of Khartoum\nTransaction ID: 998877665\nAmount: 5,000,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 11:00:00`
                         );
                       }}
-                      className="text-[11px] text-blue-600 font-bold hover:underline"
+                      className="text-[11px] text-blue-600 font-bold hover:underline self-start sm:self-auto"
                     >
-                      تحميل مثال إشعارات عمر أحمد (20 مليون SDG مجزأة)
+                      تحميل نموذج تجريبي (عمر أحمد)
                     </button>
                   </div>
                   <textarea
-                    rows={8}
+                    rows={6}
                     value={batchReceiptsText}
                     onChange={(e) => setBatchReceiptsText(e.target.value)}
                     required
-                    placeholder="الصق نصوص أو بيانات إيصالات بنكك هنا... النظام سيتعرف تلقائياً على رقم العملية والمبلغ وتاريخ التحويل وأسماء الأطراف."
-                    className="w-full p-3 font-mono text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+                    placeholder="الصق نصوص أو بيانات إيصالات بنكك هنا..."
+                    className="w-full p-3 font-mono text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
@@ -429,14 +507,14 @@ export default function ReceiptsPage() {
                   <button
                     type="button"
                     onClick={() => setUploadModalOpen(false)}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50"
+                    className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={uploading}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-500/20 disabled:opacity-50"
+                    className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 active:bg-blue-800 shadow-md shadow-blue-500/20 disabled:opacity-50 min-h-[44px]"
                   >
                     {uploading ? 'جاري التحليل واستخراج البيانات...' : 'معالجة ورفع الدفعة'}
                   </button>
@@ -446,90 +524,90 @@ export default function ReceiptsPage() {
           </div>
         )}
 
-        {/* SIDE-BY-SIDE REVIEW & APPROVAL MODAL (Section 9.4) */}
+        {/* SIDE-BY-SIDE REVIEW & APPROVAL MODAL / BOTTOM SHEET */}
         {reviewReceipt && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6 border border-slate-100 text-right">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
-                <div className="flex items-center space-x-2 space-x-reverse">
-                  <FileCheck2 className="w-5 h-5 text-blue-600" />
-                  <h3 className="font-black text-slate-900 text-base">
-                    مراجعة وتدقيق إيصال بنكك • {reviewReceipt.receiptNumber}
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-4xl max-h-[92vh] overflow-y-auto touch-scroll p-4 sm:p-6 text-right safe-area-pb">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+                <div className="flex items-center space-x-2 space-x-reverse min-w-0">
+                  <FileCheck2 className="w-5 h-5 text-blue-600 shrink-0" />
+                  <h3 className="font-black text-slate-900 text-sm sm:text-base truncate">
+                    مراجعة إيصال بنكك • {reviewReceipt.receiptNumber}
                   </h3>
                 </div>
                 <button
                   onClick={() => setReviewReceipt(null)}
-                  className="text-slate-400 hover:text-slate-600 text-lg font-bold p-1"
+                  className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
-                  ✕
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
               {/* Duplicate Alert if duplicate */}
               {reviewReceipt.status === 'duplicate' && (
-                <div className="mb-6 p-4 bg-rose-50 border border-rose-300 rounded-2xl flex items-center space-x-3 space-x-reverse text-rose-900">
-                  <AlertTriangle className="w-6 h-6 text-rose-600 flex-shrink-0" />
+                <div className="mb-4 p-3.5 bg-rose-50 border border-rose-300 rounded-2xl flex items-center space-x-3 space-x-reverse text-rose-900">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
                   <div>
-                    <h4 className="font-black text-sm">تحذير حاسم: هذا الإيصال مسجل مسبقاً في النظام!</h4>
-                    <p className="text-xs text-rose-700 mt-0.5">
-                      تم اكتشاف رقم العملية ({reviewReceipt.transactionId}) أو بصمة الصورة مسبقاً. تم منع احتسابه في الإجمالي تلقائياً لمنع التكرار المحاسبي.
+                    <h4 className="font-black text-xs sm:text-sm">تحذير حاسم: هذا الإيصال مسجل مسبقاً في النظام!</h4>
+                    <p className="text-[11px] sm:text-xs text-rose-700 mt-0.5">
+                      تم اكتشاف رقم العملية ({reviewReceipt.transactionId}) مسبقاً، وتم منعه لحماية الدفاتر المحاسبية.
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Side-by-side grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Right: Visual Simulated Receipt Preview */}
-                <div className="bg-slate-900 text-white rounded-2xl p-5 flex flex-col justify-between border border-slate-800 shadow-inner">
+              {/* Stack on mobile, 2-cols on desktop */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                {/* Visual Simulated Receipt Preview */}
+                <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 flex flex-col justify-between border border-slate-800 shadow-inner">
                   <div>
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 mb-3">
                       <div className="flex items-center space-x-2 space-x-reverse">
-                        <Building className="w-5 h-5 text-emerald-400" />
-                        <span className="font-bold text-sm text-white">بنك الخرطوم (Bank of Khartoum)</span>
+                        <Building className="w-5 h-5 text-emerald-400 shrink-0" />
+                        <span className="font-bold text-xs sm:text-sm text-white">بنك الخرطوم (BOK)</span>
                       </div>
                       <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-mono font-bold">
                         إشعار تحويل بنكك
                       </span>
                     </div>
 
-                    <div className="text-center py-4 my-2 bg-slate-800/60 rounded-xl border border-slate-800">
-                      <div className="text-xs text-slate-400 mb-1">المبلغ المحول</div>
-                      <div className="text-2xl font-black text-emerald-400 font-mono">
-                        {Number(editAmount || 0).toLocaleString()} <span className="text-xs text-slate-400">SDG</span>
+                    <div className="text-center py-3 my-2 bg-slate-800/60 rounded-xl border border-slate-800">
+                      <div className="text-[11px] text-slate-400 mb-0.5">المبلغ المحول</div>
+                      <div className="text-xl sm:text-2xl font-black text-emerald-400 font-mono">
+                        {Number(editAmount || 0).toLocaleString()} <span className="text-xs text-slate-400 font-normal">SDG</span>
                       </div>
                     </div>
 
-                    <div className="space-y-2 text-xs text-slate-300 mt-4">
+                    <div className="space-y-1.5 text-xs text-slate-300 mt-3">
                       <div className="flex justify-between py-1 border-b border-slate-800">
-                        <span className="text-slate-400">رقم العملية (Transaction ID):</span>
-                        <span className="font-mono font-bold text-white">{editTxnId}</span>
+                        <span className="text-slate-400 text-[11px]">رقم العملية:</span>
+                        <span className="font-mono font-bold text-white truncate max-w-[180px]">{editTxnId}</span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-slate-800">
-                        <span className="text-slate-400">المرسل (Sender):</span>
-                        <span className="font-medium text-white">{editSender || 'غير محدد'}</span>
+                        <span className="text-slate-400 text-[11px]">المرسل:</span>
+                        <span className="font-medium text-white truncate max-w-[180px]">{editSender || 'غير محدد'}</span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-slate-800">
-                        <span className="text-slate-400">المستفيد (Beneficiary):</span>
-                        <span className="font-medium text-white">{editReceiver || 'مكتب الصرافة'}</span>
+                        <span className="text-slate-400 text-[11px]">المستفيد:</span>
+                        <span className="font-medium text-white truncate max-w-[180px]">{editReceiver || 'مكتب الصرافة'}</span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-slate-800">
-                        <span className="text-slate-400">التاريخ:</span>
+                        <span className="text-slate-400 text-[11px]">التاريخ:</span>
                         <span className="font-mono text-white">{editDate || '2026-11-21'}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="mt-6 pt-3 border-t border-slate-800 text-[11px] text-slate-500 flex justify-between items-center">
-                    <span>درجة ثقة OCR: {reviewReceipt.ocrConfidence}%</span>
-                    <span className="font-mono">Hash: {reviewReceipt.imageHash.substring(0, 10)}...</span>
+                  <div className="mt-4 pt-2.5 border-t border-slate-800 text-[10px] text-slate-500 flex justify-between items-center">
+                    <span>ثقة OCR: {reviewReceipt.ocrConfidence}%</span>
+                    <span className="font-mono">Hash: {reviewReceipt.imageHash?.substring(0, 10)}...</span>
                   </div>
                 </div>
 
-                {/* Left: Extracted & Editable Fields */}
-                <div className="space-y-4">
-                  <h4 className="font-bold text-sm text-slate-900 flex items-center space-x-1.5 space-x-reverse">
-                    <span>بيانات الإيصال المستخرجة (قابلة للمراجعة والتصحيح)</span>
+                {/* Editable Fields */}
+                <div className="space-y-3.5">
+                  <h4 className="font-bold text-xs sm:text-sm text-slate-900">
+                    بيانات الإيصال المستخرجة (قابلة للمراجعة والتصحيح)
                   </h4>
 
                   <div>
@@ -538,7 +616,7 @@ export default function ReceiptsPage() {
                       type="text"
                       value={editTxnId}
                       onChange={(e) => setEditTxnId(e.target.value)}
-                      className="w-full px-3 py-2 font-mono text-xs font-bold rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3.5 py-2.5 font-mono text-sm font-bold rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                     />
                   </div>
 
@@ -546,9 +624,10 @@ export default function ReceiptsPage() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">المبلغ (SDG)</label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       value={editAmount}
                       onChange={(e) => setEditAmount(e.target.value)}
-                      className="w-full px-3 py-2 font-mono text-xs font-black rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3.5 py-2.5 font-mono text-sm font-black rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                     />
                   </div>
 
@@ -558,51 +637,51 @@ export default function ReceiptsPage() {
                       type="text"
                       value={editSender}
                       onChange={(e) => setEditSender(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">التاريخ</label>
                       <input
                         type="date"
                         value={editDate}
                         onChange={(e) => setEditDate(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                       />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">العميل المرتبط</label>
-                      <div className="p-2 bg-slate-100 rounded-xl text-xs font-bold text-slate-800">
+                      <div className="p-2.5 bg-slate-100 rounded-xl text-xs font-bold text-slate-800 truncate min-h-[44px] flex items-center">
                         {reviewReceipt.customer?.name || 'غير محدد'}
                       </div>
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                  <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
                     <button
                       onClick={handleReject}
                       disabled={processingAction || reviewReceipt.status === 'approved'}
-                      className="px-4 py-2.5 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-bold transition-all disabled:opacity-40"
+                      className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 rounded-xl text-xs font-bold transition-all disabled:opacity-40 min-h-[44px]"
                     >
                       رفض الإيصال
                     </button>
                     <div className="flex items-center space-x-2 space-x-reverse">
                       <button
                         onClick={() => setReviewReceipt(null)}
-                        className="px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50"
+                        className="flex-1 sm:flex-none px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 min-h-[44px]"
                       >
-                        إغلاق
+                        إلغاء
                       </button>
                       <button
                         onClick={handleApprove}
                         disabled={processingAction || reviewReceipt.status === 'approved' || reviewReceipt.status === 'duplicate'}
-                        className="px-6 py-2.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center space-x-1.5 space-x-reverse disabled:opacity-40"
+                        className="flex-1 sm:flex-none px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse disabled:opacity-40 min-h-[44px]"
                       >
-                        <Check className="w-4 h-4" />
-                        <span>اعتماد الإيصال وتسجيل القيد المالي</span>
+                        <Check className="w-4 h-4 shrink-0" />
+                        <span>اعتماد الإيصال وقيد مالي</span>
                       </button>
                     </div>
                   </div>

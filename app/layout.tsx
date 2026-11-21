@@ -1,9 +1,18 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'منصة إدارة الصرافة والتحويلات المالية والمحاسبة',
   description: 'نظام مالي ومحاسبي متكامل لإدارة نشاط الصرافة وإيصالات بنكك والعهد والموردين والإغلاق اليومي',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+  themeColor: '#0f172a',
 };
 
 export default function RootLayout({
