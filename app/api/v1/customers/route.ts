@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   if (!user) return authError();
 
   const { searchParams } = new URL(req.url);
-  const search = searchParams.get('q') || '';
+  const search = searchParams.get('q')?.trim() || '';
   const status = searchParams.get('status') || '';
 
   const whereClause: any = {};
@@ -17,10 +17,12 @@ export async function GET(req: NextRequest) {
   }
   if (search) {
     whereClause.OR = [
-      { name: { contains: search } },
+      { name: { contains: search, mode: 'insensitive' } },
       { phone: { contains: search } },
-      { customerCode: { contains: search } },
+      { secondaryPhone: { contains: search } },
+      { customerCode: { contains: search, mode: 'insensitive' } },
       { identityNumber: { contains: search } },
+      { city: { contains: search, mode: 'insensitive' } },
     ];
   }
 
@@ -28,6 +30,7 @@ export async function GET(req: NextRequest) {
     where: whereClause,
     include: {
       sessions: {
+        where: { status: { not: 'cancelled' } },
         orderBy: { createdAt: 'desc' },
         take: 5,
       },
@@ -49,45 +52,128 @@ export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  // RBAC permission check for customer creation
+  if (!['admin', 'accountant', 'data_entry'].includes(user.role)) {
+    return NextResponse.json(
+      { error: 'ليس لديك صلاحية إضافة عميل جديد في النظام', success: false },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await req.json();
     const { name, phone, secondaryPhone, whatsapp, identityNumber, address, city, notes } = body;
 
-    if (!name || !phone) {
-      return NextResponse.json({ error: 'الاسم ورقم الهاتف مطلوبان' }, { status: 400 });
+    // Strict field validations
+    if (!name || typeof name !== 'string' || name.trim().length < 3) {
+      return NextResponse.json(
+        { error: 'اسم العميل مطلوب ويجب أن يحتوي على 3 أحرف على الأقل', success: false },
+        { status: 400 }
+      );
     }
 
-    // Auto-generate customer code
-    const count = await prisma.customer.count();
-    const customerCode = `CUST-${1000 + count + 1}`;
+    if (!phone || typeof phone !== 'string' || phone.trim().length < 7) {
+      return NextResponse.json(
+        { error: 'رقم الهاتف مطلوب ويجب أن يحتوي على 7 أرقام على الأقل', success: false },
+        { status: 400 }
+      );
+    }
 
-    const customer = await prisma.customer.create({
-      data: {
-        customerCode,
-        name,
-        phone,
-        secondaryPhone,
-        whatsapp: whatsapp || phone,
-        identityNumber,
-        address,
-        city,
-        notes,
+    const cleanPhone = phone.trim();
+    const cleanName = name.trim();
+
+    // Check for existing active customer with the same primary phone
+    const existing = await prisma.customer.findFirst({
+      where: {
+        phone: cleanPhone,
         status: 'active',
       },
     });
 
+    if (existing) {
+      return NextResponse.json(
+        {
+          error: `يوجد عميل مسجل بالفعل برقم الهاتف هذا: ${existing.name} (${existing.customerCode})`,
+          success: false,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Safe, collision-free customer code generation under concurrency
+    const latest = await prisma.customer.findFirst({
+      orderBy: { customerCode: 'desc' },
+      select: { customerCode: true },
+    });
+
+    let nextNum = 1001;
+    if (latest?.customerCode && latest.customerCode.startsWith('CUST-')) {
+      const parsed = parseInt(latest.customerCode.replace('CUST-', ''), 10);
+      if (!isNaN(parsed) && parsed >= nextNum) {
+        nextNum = parsed + 1;
+      }
+    }
+
+    // Default WhatsApp to phone if empty
+    const resolvedWhatsapp = (whatsapp && typeof whatsapp === 'string' && whatsapp.trim().length > 0)
+      ? whatsapp.trim()
+      : cleanPhone;
+
+    // Retry loop on unique constraint collision
+    let customer = null;
+    let attempts = 0;
+    while (!customer && attempts < 5) {
+      const candidateCode = `CUST-${nextNum + attempts}`;
+      try {
+        customer = await prisma.customer.create({
+          data: {
+            customerCode: candidateCode,
+            name: cleanName,
+            phone: cleanPhone,
+            secondaryPhone: secondaryPhone?.trim() || null,
+            whatsapp: resolvedWhatsapp,
+            identityNumber: identityNumber?.trim() || null,
+            address: address?.trim() || null,
+            city: city?.trim() || 'القاهرة',
+            notes: notes?.trim() || null,
+            status: 'active',
+          },
+        });
+      } catch (err: any) {
+        if (err.code === 'P2002') {
+          attempts++;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (!customer) {
+      throw new Error('تعذر توليد كود عميل فريد، يرجى إعادة المحاولة');
+    }
+
+    // Audit Logging
     await logAuditEvent({
       userId: user.userId,
       action: 'CREATE_CUSTOMER',
       entityType: 'Customer',
       entityId: customer.id,
-      newValues: customer,
-      reason: 'إضافة عميل جديد للنظام',
+      newValues: {
+        id: customer.id,
+        customerCode: customer.customerCode,
+        name: customer.name,
+        phone: customer.phone,
+        city: customer.city,
+      },
+      reason: `إضافة عميل جديد للنظام بواسطة ${user.name} (${user.role})`,
     });
 
     return NextResponse.json({ success: true, data: customer }, { status: 201 });
   } catch (error: any) {
     console.error('Error creating customer:', error);
-    return NextResponse.json({ error: error.message || 'خطأ في إنشاء العميل' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || 'خطأ في إنشاء العميل', success: false },
+      { status: 500 }
+    );
   }
 }
