@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: exchange-management-platform
+    name: exchange-management-system
     env: node
     plan: free
     region: frankfurt
@@ -10,6 +10,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://exchange-management-system.onrender.com
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL

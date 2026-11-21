@@ -86,7 +86,7 @@ node scripts/seed.mjs
 npm run dev
 ```
 
-افتح المتصفح على: `http://localhost:3000`
+افتح المتصفح محلياً على: `http://localhost:3000` أو على الرابط السحابي المباشر: `https://exchange-management-system.onrender.com`
 
 ### بيانات الدخول التجريبية الجاهزة:
 - **مدير النظام (Admin)**: `admin@exchange.com` / كلمة المرور: `admin123`
