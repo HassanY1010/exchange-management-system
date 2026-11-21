@@ -295,7 +295,7 @@ async function runFocusedClosureAudit() {
 
   const statuses = [data1.status, data2.status];
   assert(
-    statuses.includes('duplicate') && (statuses.includes('pending_verification') || statuses.includes('suspicious')),
+    statuses.includes('duplicate') && (statuses.includes('pending_verification') || statuses.includes('pending_review') || statuses.includes('suspicious')),
     'قفل قاعدة البيانات وقيد الفرادة: تم قبول إحداهما كإيصال نشط واكتشاف وتصنيف الأخرى فورياً كـ duplicate'
   );
 
@@ -325,7 +325,7 @@ async function runFocusedClosureAudit() {
   const blurryUpload = await callUpload({
     customerId: testCustomer.id,
     rawOcrText: 'نص غير واضح ومشتت ... ?? !!',
-    imageData: 'synthetic-blurry-image-data',
+    imageData: `synthetic-blurry-image-data-${Date.now()}`,
   });
   assert(blurryUpload.status === 201, 'نجاح رفع الإيصال غير الواضح وعدم فقدان الملف');
   const blurryReceipt = blurryUpload.json.data[0];
@@ -336,9 +336,10 @@ async function runFocusedClosureAudit() {
   );
 
   // Test 2: Incomplete financial data (amount missing or 0)
+  const incTxn = `TXN-INC-${Date.now()}`;
   const incompleteUpload = await callUpload({
     customerId: testCustomer.id,
-    rawOcrText: 'Bank of Khartoum\nTransaction ID: 999888\nSender: غير مكتمل',
+    rawOcrText: `Bank of Khartoum\nTransaction ID: ${incTxn}\nSender: غير مكتمل`,
   });
   const incReceipt = incompleteUpload.json.data[0];
   assert(

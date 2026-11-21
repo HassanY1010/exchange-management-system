@@ -117,6 +117,18 @@ export async function PATCH(
       if (customerId !== undefined) updateData.customerId = customerId || null;
       if (customerSessionId !== undefined) updateData.customerSessionId = customerSessionId || null;
 
+      // Support re-processing OCR text on existing receipt
+      if (body.reprocessOcr && current.ocrText) {
+        const { parseBankakReceiptText } = await import('@/lib/ocr/bankak-parser');
+        const reParsed = parseBankakReceiptText(current.ocrText);
+        if (reParsed.transactionId) updateData.transactionId = reParsed.transactionId;
+        if (reParsed.amount > 0) updateData.amount = new Decimal(reParsed.amount).toFixed(4);
+        if (reParsed.senderName) updateData.senderName = reParsed.senderName;
+        if (reParsed.receiverName) updateData.receiverName = reParsed.receiverName;
+        if (reParsed.transactionDate) updateData.transactionDate = reParsed.transactionDate;
+        updateData.ocrConfidence = reParsed.ocrConfidence;
+      }
+
       const updated = await tx.bankakReceipt.update({
         where: { id: params.id },
         data: updateData,

@@ -90,7 +90,8 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 3. Sender Name
   let senderName = '';
   const senderPatterns = [
-    /(?:Sender|From|المرسل|من\s*الحساب|اسم\s*المرسل|من\s*العميل)[\s:]*([^\n\r,:]+)/i,
+    /(?:اسم\s*المرسل|اسم\s*العميل|المرسل|من\s*العميل|\bSender(?:\s*Name)?\b|\bFrom\b)[\s:]*([^\n\r,:\d][^\n\r,:]*)/i,
+    /(?:من)[\s:]+([^\n\r,:\d][^\n\r,:]*)/i,
   ];
   for (const pattern of senderPatterns) {
     const match = normalized.match(pattern);
@@ -104,7 +105,7 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 4. Sender Account
   let senderAccount = '';
   const senderAccPatterns = [
-    /(?:Sender\s*Account|From\s*Account|رقم\s*حساب\s*المرسل|حساب\s*الخصم)[\s:]*([0-9\*\-]{6,20})/i,
+    /(?:\bSender\s*Account\b|\bFrom\s*Account\b|رقم\s*حساب\s*المرسل|حساب\s*الخصم|من\s*الحساب|من\s*حساب)[\s:]*([0-9\*\-]{6,20})/i,
   ];
   for (const pattern of senderAccPatterns) {
     const match = normalized.match(pattern);
@@ -118,7 +119,8 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 5. Receiver Name
   let receiverName = '';
   const receiverPatterns = [
-    /(?:Beneficiary|Receiver|To|المستفيد|المستلم|إلى\s*حساب|اسم\s*المستفيد)[\s:]*([^\n\r,:]+)/i,
+    /(?:اسم\s*المستفيد|المستفيد|المستلم|\bBeneficiary(?:\s*Name)?\b|\bReceiver\b|\bTo\b)[\s:]*([^\n\r,:\d][^\n\r,:]*)/i,
+    /(?:إلى)[\s:]+([^\n\r,:\d][^\n\r,:]*)/i,
   ];
   for (const pattern of receiverPatterns) {
     const match = normalized.match(pattern);
@@ -132,7 +134,7 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 6. Receiver Account
   let receiverAccount = '';
   const receiverAccPatterns = [
-    /(?:Beneficiary\s*Account|To\s*Account|رقم\s*حساب\s*المستفيد|حساب\s*الإيداع)[\s:]*([0-9\*\-]{6,20})/i,
+    /(?:\bBeneficiary\s*Account\b|\bTo\s*Account\b|رقم\s*حساب\s*المستفيد|حساب\s*الإيداع|إلى\s*الحساب|إلى\s*حساب)[\s:]*([0-9\*\-]{6,20})/i,
   ];
   for (const pattern of receiverAccPatterns) {
     const match = normalized.match(pattern);
@@ -269,7 +271,8 @@ export function evaluateReceiptRisk(
   // 2. Suspicious Heuristic Match (Same amount, same date, similar sender name)
   for (const existing of existingReceipts) {
     if (existing.status === 'rejected' || existing.status === 'duplicate') continue;
-    const sameAmount = Math.abs(Number(existing.amount) - Number(newReceipt.amount)) < 0.01;
+    const hasValidAmount = Number(newReceipt.amount) > 0 && Number(existing.amount) > 0;
+    const sameAmount = hasValidAmount && Math.abs(Number(existing.amount) - Number(newReceipt.amount)) < 0.01;
     const sameDate =
       existing.transactionDate &&
       newReceipt.transactionDate &&
@@ -277,7 +280,12 @@ export function evaluateReceiptRisk(
     
     const senderA = (existing.senderName || '').trim();
     const senderB = (newReceipt.senderName || '').trim();
+    const isDefaultSender =
+      senderA === 'غير محدد' || senderB === 'غير محدد' ||
+      senderA === 'Unknown' || senderB === 'Unknown' ||
+      senderA === 'غير معروف' || senderB === 'غير معروف';
     const senderSimilar =
+      !isDefaultSender &&
       senderA.length > 3 &&
       senderB.length > 3 &&
       (senderA.includes(senderB) || senderB.includes(senderA));

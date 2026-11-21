@@ -77,10 +77,10 @@ export async function POST(req: NextRequest) {
           const match = imageData.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9\-\+\.]+);base64,/);
           if (match) {
             const mime = match[1].toLowerCase();
-            const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
+            const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
             if (!allowedMimes.includes(mime)) {
               return NextResponse.json(
-                { error: `نوع الملف (${mime}) غير مدعوم. يرجى رفع صور بصيغة PNG أو JPG أو WebP أو PDF` },
+                { error: `نوع الملف (${mime}) غير مدعوم حالياً. يرجى رفع إشعارات بنكك كصور بصيغة PNG أو JPG أو JPEG أو WebP أو تصويرها مباشرة بكاميرا الجوال` },
                 { status: 400 }
               );
             }

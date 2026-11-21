@@ -155,7 +155,7 @@ async function runReceiptsAuditTests() {
   const uploadPayload1 = {
     customerId: testCustomer.id,
     rawOcrText: `Bank of Khartoum\nTransaction ID: ${testTxn1}\nAmount: 2,500,000 SDG\nSender: حاتم إبراهيم\nDate: 21/11/2026\nTime: 14:30:00`,
-    imageData: `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==`,
+    imageData: `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==${Buffer.from('unique-' + Date.now()).toString('base64')}`,
   };
 
   const res1 = await callUpload(uploadPayload1, tokenDataEntry);

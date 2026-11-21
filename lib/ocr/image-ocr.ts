@@ -56,7 +56,7 @@ export async function processReceiptImageWithOcr(
     let imageInput: Buffer | string = imageBufferOrBase64;
     if (typeof imageBufferOrBase64 === 'string' && imageBufferOrBase64.startsWith('data:image')) {
       // Extract base64 part
-      const base64Data = imageBufferOrBase64.replace(/^data:image\/\w+;base64,/, '');
+      const base64Data = imageBufferOrBase64.replace(/^data:image\/[a-zA-Z0-9\-\+\.]+;base64,/, '');
       imageInput = Buffer.from(base64Data, 'base64');
     }
 
