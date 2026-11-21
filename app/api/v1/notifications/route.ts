@@ -58,8 +58,17 @@ export async function PATCH(req: NextRequest) {
   const { id } = body;
 
   if (id) {
-    await prisma.notification.update({
-      where: { id },
+    const singleWhere: any = { id };
+    if (user.role !== 'admin') {
+      singleWhere.OR = [
+        { recipientRole: 'all' },
+        { recipientRole: user.role },
+        { recipientRole: null },
+        { userId: user.userId },
+      ];
+    }
+    await prisma.notification.updateMany({
+      where: singleWhere,
       data: { isRead: true, readAt: new Date() },
     });
   } else {
