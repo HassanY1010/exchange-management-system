@@ -30,10 +30,12 @@ export async function getUserFromRequest(req: NextRequest): Promise<TokenPayload
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.substring(7);
+  } else if (req.cookies.get('auth_token')?.value) {
+    token = req.cookies.get('auth_token')!.value;
   } else {
-    // Check cookies
-    const cookieToken = req.cookies.get('auth_token')?.value;
-    if (cookieToken) token = cookieToken;
+    // Check query parameter for authenticated media requests (e.g. <img> tags or full screen window.open)
+    const queryToken = req.nextUrl?.searchParams?.get('token');
+    if (queryToken) token = queryToken;
   }
 
   if (!token) return null;

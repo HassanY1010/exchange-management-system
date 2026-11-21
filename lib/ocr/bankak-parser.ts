@@ -146,7 +146,8 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   }
 
   // 7. Date
-  let transactionDate = new Date().toISOString().split('T')[0];
+  let dateMatched = false;
+  let transactionDate = '';
   const datePatterns = [
     /(?:Date|التاريخ|تاريخ\s*العملية)[\s:]*([0-9]{1,4}[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{1,4})/i,
     /([0-9]{2}[\/\-\.][0-9]{2}[\/\-\.][0-9]{4})/,
@@ -161,23 +162,32 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
         if (parts[0].length === 4) {
           // YYYY-MM-DD
           transactionDate = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+          dateMatched = true;
         } else if (parts[2].length === 4) {
           // DD-MM-YYYY
           transactionDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+          dateMatched = true;
         }
       }
-      fieldsMatched++;
-      break;
+      if (dateMatched) {
+        fieldsMatched++;
+        break;
+      }
     }
+  }
+  if (!transactionDate) {
+    transactionDate = new Date().toISOString().split('T')[0];
   }
 
   // 8. Time
-  let transactionTime = '12:00:00';
+  let transactionTime = '';
   const timePattern = /([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?(?:\s*[AaPp][Mm])?)/;
   const timeMatch = normalized.match(timePattern);
   if (timeMatch) {
     transactionTime = timeMatch[1].trim();
     fieldsMatched++;
+  } else {
+    transactionTime = '12:00:00';
   }
 
   // Calculate confidence score (weighted out of 100)
@@ -185,18 +195,18 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   let confidence = 0;
   if (transactionId) confidence += 35;
   if (amount > 0) confidence += 35;
-  if (transactionDate) confidence += 10;
+  if (dateMatched) confidence += 10;
   if (senderName || senderAccount) confidence += 10;
   if (receiverName || receiverAccount) confidence += 10;
 
   return {
-    transactionId: transactionId || `TXN-${Date.now()}`,
+    transactionId: transactionId || '',
     amount,
     currency: 'SDG',
-    senderName: senderName || 'غير محدد',
-    senderAccount: senderAccount || 'غير متوفر',
-    receiverName: receiverName || 'مكتب الصرافة',
-    receiverAccount: receiverAccount || 'حساب بنكك الرئيسي',
+    senderName: senderName || '',
+    senderAccount: senderAccount || '',
+    receiverName: receiverName || '',
+    receiverAccount: receiverAccount || '',
     transactionDate,
     transactionTime,
     bankName: 'بنكك - بنك الخرطوم (Bank of Khartoum)',

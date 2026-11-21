@@ -569,8 +569,23 @@ export default function ReceiptsPage() {
   };
 
   const isRealImage = (key?: string) => {
-    if (!key) return false;
-    return key.startsWith('http') || key.startsWith('/uploads') || key.startsWith('data:image');
+    if (!key || key === 'no-image') return false;
+    return (
+      key.startsWith('http') ||
+      key.startsWith('/uploads') ||
+      key.startsWith('data:image') ||
+      key.startsWith('receipts/') ||
+      key.startsWith('local:')
+    );
+  };
+
+  const getDisplayImageUrl = (rcp: any) => {
+    if (!rcp || !rcp.imageStorageKey || rcp.imageStorageKey === 'no-image') return '';
+    if (rcp.imageStorageKey.startsWith('http') || rcp.imageStorageKey.startsWith('data:image')) {
+      return rcp.imageStorageKey;
+    }
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('auth_token')) : '';
+    return `/api/v1/receipts/${rcp.id}/image${token ? `?token=${encodeURIComponent(token)}` : ''}`;
   };
 
   return (
@@ -1184,16 +1199,16 @@ export default function ReceiptsPage() {
                       <div className="space-y-2">
                         <div className="relative group bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center max-h-72">
                           <img
-                            src={reviewReceipt.imageStorageKey}
+                            src={getDisplayImageUrl(reviewReceipt)}
                             alt="صورة إيصال بنكك الأصلية"
                             className="max-h-72 w-auto object-contain cursor-zoom-in transition-transform duration-200 group-hover:scale-105"
-                            onClick={() => window.open(reviewReceipt.imageStorageKey, '_blank')}
+                            onClick={() => window.open(getDisplayImageUrl(reviewReceipt), '_blank')}
                           />
                         </div>
                         <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
                           <span>انقر على الصورة للتكبير</span>
                           <a
-                            href={reviewReceipt.imageStorageKey}
+                            href={getDisplayImageUrl(reviewReceipt)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-blue-400 hover:underline flex items-center space-x-1 space-x-reverse"

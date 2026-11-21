@@ -19,30 +19,33 @@ export const supabase = (supabaseUrl && supabaseKey && !supabaseUrl.includes('yo
 
 export interface UploadReceiptResult {
   storageKey: string;
+  signedUrl?: string;
   publicUrl?: string;
   source: 'supabase_storage' | 'local_storage';
 }
 
 /**
- * Helper to save image buffer to local public directory so Next.js can serve it
+ * Helper to save image buffer to local private directory (outside public/ to prevent unauthenticated access)
  */
 async function saveLocalFallback(fileBuffer: Buffer, fileId: string): Promise<UploadReceiptResult> {
   try {
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'receipts');
+    const uploadDir = path.join(process.cwd(), 'storage', 'receipts');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
     const localFilePath = path.join(uploadDir, fileId);
     await fs.promises.writeFile(localFilePath, fileBuffer);
     return {
-      storageKey: `receipts/${fileId}`,
-      publicUrl: `/uploads/receipts/${fileId}`,
+      storageKey: `local:receipts/${fileId}`,
+      signedUrl: undefined,
+      publicUrl: undefined,
       source: 'local_storage',
     };
   } catch (err: any) {
     console.warn('Local file saving error:', err.message);
     return {
       storageKey: fileId,
+      signedUrl: undefined,
       publicUrl: undefined,
       source: 'local_storage',
     };
@@ -51,6 +54,7 @@ async function saveLocalFallback(fileBuffer: Buffer, fileId: string): Promise<Up
 
 /**
  * Uploads an image (Buffer or base64 data URL) to Supabase Storage bucket with local fallback
+ * Ensures the bucket is private and generates cryptographic signed URLs instead of public URLs.
  */
 export async function uploadReceiptImage(
   imageBufferOrBase64: Buffer | string,
@@ -95,20 +99,64 @@ export async function uploadReceiptImage(
       return await saveLocalFallback(fileBuffer, fileId);
     }
 
-    const { data: publicUrlData } = supabase.storage
+    // Generate secure signed URL with token (valid for 24 hours, refreshed on demand)
+    const { data: signedData, error: signedError } = await supabase.storage
       .from(defaultBucket)
-      .getPublicUrl(data.path);
+      .createSignedUrl(data.path, 86400);
 
-    // Also write local copy for high-speed local preview and redundancy
-    saveLocalFallback(fileBuffer, fileId).catch(() => {});
+    if (signedError) {
+      console.warn('Warning generating signed URL:', signedError.message);
+    }
 
     return {
       storageKey: data.path,
-      publicUrl: publicUrlData?.publicUrl || `/uploads/receipts/${fileId}`,
+      signedUrl: signedData?.signedUrl,
+      publicUrl: signedData?.signedUrl,
       source: 'supabase_storage',
     };
   } catch (err) {
     console.warn('Failed to upload to Supabase, fallback to local file system:', err);
     return await saveLocalFallback(fileBuffer, fileId);
   }
+}
+
+/**
+ * Generates a fresh, short-lived signed URL for a private Supabase storage key
+ */
+export async function getReceiptSignedUrl(
+  storageKey: string,
+  expiresInSeconds: number = 3600
+): Promise<string | null> {
+  if (!storageKey || storageKey === 'no-image') return null;
+
+  // Data URLs can be rendered directly
+  if (storageKey.startsWith('data:image')) return storageKey;
+
+  // If already a valid signed URL with token parameter
+  if (storageKey.startsWith('http') && storageKey.includes('token=')) {
+    return storageKey;
+  }
+
+  if (supabase) {
+    let cleanPath = storageKey;
+    // Extract path if given a full URL
+    if (cleanPath.startsWith('http')) {
+      const match = cleanPath.match(/\/receipts\/(receipts\/.+)$/);
+      if (match) cleanPath = match[1];
+    }
+    cleanPath = cleanPath.replace(/^local:/, '');
+
+    try {
+      const { data, error } = await supabase.storage
+        .from(defaultBucket)
+        .createSignedUrl(cleanPath, expiresInSeconds);
+      if (!error && data?.signedUrl) {
+        return data.signedUrl;
+      }
+    } catch (err: any) {
+      console.warn('Failed to generate Supabase signed URL:', err.message);
+    }
+  }
+
+  return null;
 }
