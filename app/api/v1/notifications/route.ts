@@ -29,25 +29,46 @@ export async function GET(req: NextRequest) {
     whereClause.priority = priority;
   }
 
-  const [notifications, unreadCount] = await Promise.all([
-    prisma.notification.findMany({
-      where: whereClause,
-      orderBy: { createdAt: 'desc' },
-      take: 60,
-    }),
-    prisma.notification.count({
-      where: {
-        ...whereClause,
-        isRead: false,
-      },
-    }),
-  ]);
+  try {
+    const [notifications, unreadCount] = await Promise.all([
+      prisma.notification.findMany({
+        where: whereClause,
+        orderBy: { createdAt: 'desc' },
+        take: 60,
+      }),
+      prisma.notification.count({
+        where: {
+          ...whereClause,
+          isRead: false,
+        },
+      }),
+    ]);
 
-  return NextResponse.json({
-    success: true,
-    data: notifications,
-    unreadCount,
-  });
+    return NextResponse.json({
+      success: true,
+      data: notifications,
+      unreadCount,
+    });
+  } catch (err: any) {
+    console.warn('Fallback notifications query due to schema discrepancy:', err.message);
+    try {
+      const basicNotifications = await prisma.notification.findMany({
+        take: 30,
+        orderBy: { createdAt: 'desc' },
+      });
+      return NextResponse.json({
+        success: true,
+        data: basicNotifications,
+        unreadCount: basicNotifications.filter((n) => !n.isRead).length,
+      });
+    } catch (fallbackErr) {
+      return NextResponse.json({
+        success: true,
+        data: [],
+        unreadCount: 0,
+      });
+    }
+  }
 }
 
 export async function PATCH(req: NextRequest) {

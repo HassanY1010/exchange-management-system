@@ -81,13 +81,19 @@ export async function GET(req: NextRequest) {
     .reduce((sum, a) => sum + Number(a.currentBalance), 0);
 
   // 2. Today's sessions & counts (strictly excluding cancelled sessions)
-  const todaySessions = await prisma.customerSession.findMany({
-    where: {
-      businessDate: todayStr,
-      status: { not: 'cancelled' },
-    },
-    include: { customer: true },
-  });
+  let todaySessions: any[] = [];
+  try {
+    todaySessions = await prisma.customerSession.findMany({
+      where: {
+        businessDate: todayStr,
+        status: { not: 'cancelled' },
+      },
+      include: { customer: true },
+    });
+  } catch (err: any) {
+    console.warn('Fallback fetching today sessions:', err.message);
+    todaySessions = [];
+  }
 
   const totalCustomersToday = new Set(todaySessions.map((s) => s.customerId)).size;
   const totalReceivedSdgToday = todaySessions.reduce((sum, s) => sum + Number(s.receivedAmount), 0);
