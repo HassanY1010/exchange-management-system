@@ -8,6 +8,8 @@ services:
     startCommand: npm run start
     healthCheckPath: /api/v1/health
     envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_APP_URL
