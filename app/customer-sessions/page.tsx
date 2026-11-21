@@ -237,18 +237,42 @@ export default function CustomerSessionsPage() {
   };
 
   const handleCloseSession = async (sessionId: string) => {
-    if (!confirm('هل أنت متأكد من إغلاق هذه الجلسة المالية؟')) return;
+    if (!confirm('هل أنت متأكد من رغبتك في إغلاق هذه الجلسة المالية وإكمالها؟')) return;
     try {
       const res = await fetch(`/api/v1/customer-sessions/${sessionId}`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'close' }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setActiveSession(null);
         fetchSessions();
+      } else {
+        alert(data.error || 'تعذر إغلاق الجلسة لعدم استيفاء الشروط المالية');
       }
-    } catch (err) {
-      alert('خطأ في إغلاق الجلسة');
+    } catch (err: any) {
+      alert(err.message || 'خطأ في الاتصال بالخادم أثناء إغلاق الجلسة');
+    }
+  };
+
+  const handleCancelSession = async (sessionId: string) => {
+    if (!confirm('هل أنت متأكد من رغبتك في إلغاء هذه الجلسة الحسابية؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+    try {
+      const res = await fetch(`/api/v1/customer-sessions/${sessionId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel' }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setActiveSession(null);
+        fetchSessions();
+      } else {
+        alert(data.error || 'تعذر إلغاء الجلسة');
+      }
+    } catch (err: any) {
+      alert(err.message || 'خطأ في الاتصال بالخادم أثناء إلغاء الجلسة');
     }
   };
 
@@ -684,17 +708,32 @@ export default function CustomerSessionsPage() {
                 </div>
 
                 <div className="flex items-center space-x-2 space-x-reverse">
-                  <button
-                    onClick={() => handleCloseSession(activeSession.id)}
-                    className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold min-h-[44px]"
-                  >
-                    إغلاق الجلسة
-                  </button>
+                  {activeSession.status !== 'completed' && activeSession.status !== 'cancelled' && (
+                    <button
+                      onClick={() => handleCloseSession(activeSession.id)}
+                      className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold min-h-[44px]"
+                    >
+                      إغلاق الجلسة
+                    </button>
+                  )}
+
+                  {activeSession.status === 'open' &&
+                    Number(activeSession.receivedAmount) === 0 &&
+                    Number(activeSession.deliveredAmount) === 0 &&
+                    ['admin', 'accountant'].includes(currentUserRole) && (
+                      <button
+                        onClick={() => handleCancelSession(activeSession.id)}
+                        className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs font-bold min-h-[44px]"
+                      >
+                        إلغاء الجلسة
+                      </button>
+                    )}
+
                   <button
                     onClick={() => setActiveSession(null)}
                     className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold min-h-[44px]"
                   >
-                    إلغاء
+                    إغلاق النافذة
                   </button>
                 </div>
               </div>

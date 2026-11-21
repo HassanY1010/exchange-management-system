@@ -101,18 +101,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Safe, collision-free customer code generation under concurrency
-    const latest = await prisma.customer.findFirst({
-      orderBy: { customerCode: 'desc' },
+    const existingCustCodes = await prisma.customer.findMany({
+      where: { customerCode: { startsWith: 'CUST-' } },
       select: { customerCode: true },
     });
 
-    let nextNum = 1001;
-    if (latest?.customerCode && latest.customerCode.startsWith('CUST-')) {
-      const parsed = parseInt(latest.customerCode.replace('CUST-', ''), 10);
-      if (!isNaN(parsed) && parsed >= nextNum) {
-        nextNum = parsed + 1;
+    let maxNum = 1000;
+    for (const c of existingCustCodes) {
+      const numPart = parseInt(c.customerCode.replace('CUST-', ''), 10);
+      if (!isNaN(numPart) && numPart > maxNum) {
+        maxNum = numPart;
       }
     }
+    let nextNum = maxNum + 1;
 
     // Default WhatsApp to phone if empty
     const resolvedWhatsapp = (whatsapp && typeof whatsapp === 'string' && whatsapp.trim().length > 0)

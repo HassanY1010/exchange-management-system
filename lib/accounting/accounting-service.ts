@@ -10,6 +10,7 @@ export interface PostLedgerParams {
   entryDate?: string;
   description: string;
   createdBy: string;
+  tx?: any;
   lines: {
     accountId: string;
     currency: string;
@@ -36,16 +37,16 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
   const dateStr = params.entryDate || new Date().toISOString().split('T')[0];
   const entryNumber = `JE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-  return await prisma.$transaction(async (tx) => {
+  const executeCore = async (tx: any) => {
     // 1. Lock all affected accounts in deterministic sorted order before any inserts to eliminate deadlocks and race conditions
     const uniqueAccountIds = Array.from(new Set(params.lines.map((l) => l.accountId))).sort();
     const lockedAccountsMap = new Map<string, any>();
 
     for (const accId of uniqueAccountIds) {
-      const rows = await tx.$queryRawUnsafe<any[]>(
+      const rows = (await tx.$queryRawUnsafe(
         'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance" FROM "Account" WHERE id = $1 FOR UPDATE',
         accId
-      );
+      )) as any[];
       if (!rows || rows.length === 0) {
         throw new Error(`الحساب المالي رقم ${accId} غير موجود`);
       }
@@ -126,5 +127,11 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
     });
 
     return entry;
-  });
+  };
+
+  if (params.tx) {
+    return await executeCore(params.tx);
+  } else {
+    return await prisma.$transaction(executeCore);
+  }
 }

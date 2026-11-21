@@ -40,6 +40,17 @@ export async function POST(
         throw new Error('لا يمكن اعتماد إيصال تم رفضه مسبقاً');
       }
 
+      // Prohibit approving receipt for a cancelled customer session
+      if (locked[0].customerSessionId) {
+        const linkedSession = await tx.customerSession.findUnique({
+          where: { id: locked[0].customerSessionId },
+          select: { status: true },
+        });
+        if (linkedSession && linkedSession.status === 'cancelled') {
+          throw new Error('لا يمكن اعتماد إيصال مالي لجلسة حسابية ملغاة');
+        }
+      }
+
       // Enforce Verified State prior to Financial Approval (or Admin direct dual-verification)
       if (locked[0].status !== 'verified' && !directVerification && user.role !== 'admin') {
         throw new Error('لا يمكن الاعتماد المالي للإيصال قبل التحقق من وصول الأموال لحساب بنكك أولاً (يجب أن تكون حالة الإيصال Verified)');

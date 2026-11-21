@@ -25,113 +25,128 @@ export async function POST(
       return NextResponse.json({ error: 'يجب تحديد إجراء صحيح لتسوية الفائض: ترحيل للرصيد، إرجاع نقدي، أو قيد التزام' }, { status: 400 });
     }
 
-    const session = await prisma.customerSession.findUnique({
-      where: { id: params.id },
-      include: { customer: true },
+    const result = await prisma.$transaction(async (tx) => {
+      const lockedRows = await tx.$queryRawUnsafe<any[]>(
+        'SELECT id, "overpaymentAmount", "overpaymentSettled", "sessionNumber", "customerId" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+        params.id
+      );
+
+      if (!lockedRows || lockedRows.length === 0) {
+        throw new Error('الجلسة غير موجودة');
+      }
+
+      const locked = lockedRows[0];
+
+      if (locked.overpaymentSettled) {
+        throw new Error('تمت تسوية فائض السداد لهذه الجلسة مسبقاً ولا يمكن تكرار التسوية');
+      }
+
+      const overpayment = new Decimal(locked.overpaymentAmount.toString());
+      if (overpayment.lessThanOrEqualTo(0.0001)) {
+        throw new Error('لا يوجد مبلغ فائض مسجل في هذه الجلسة لتسويته');
+      }
+
+      const customer = await tx.customer.findUnique({ where: { id: locked.customerId } });
+      const customerName = customer ? customer.name : 'العميل';
+      const overpaymentNum = overpayment.toNumber();
+
+      // Accounts
+      const customerLiabilitySdg = await tx.account.findFirst({ where: { accountCode: '2015' } });
+      const bankakAccount = await tx.account.findFirst({ where: { accountCode: '1030' } });
+
+      if (!customerLiabilitySdg || !bankakAccount) {
+        throw new Error('حسابات وسيط التزامات العملاء (2015) أو بنكك (1030) غير مهيأة');
+      }
+
+      if (action === 'cash_refund') {
+        // Refund surplus SDG to customer via Bankak transfer
+        await postLedgerTransaction({
+          entryType: 'overpayment_refund',
+          referenceType: 'CustomerSession',
+          referenceId: locked.id,
+          description: `استرداد فائض سداد ${overpaymentNum.toLocaleString()} SDG للعميل ${customerName} (جلسة ${locked.sessionNumber})`,
+          createdBy: user.name,
+          tx,
+          lines: [
+            {
+              accountId: customerLiabilitySdg.id,
+              currency: 'SDG',
+              debit: overpaymentNum,
+              credit: 0,
+              description: `إلغاء التزام الفائض للعميل ${customerName}`,
+            },
+            {
+              accountId: bankakAccount.id,
+              currency: 'SDG',
+              debit: 0,
+              credit: overpaymentNum,
+              description: `تحويل استرداد فائض من حساب بنكك`,
+            },
+          ],
+        });
+      } else {
+        // Keep as permanent customer balance / general customer credit liability
+        await postLedgerTransaction({
+          entryType: 'overpayment_to_customer_credit',
+          referenceType: 'CustomerSession',
+          referenceId: locked.id,
+          description: `ترحيل فائض سداد ${overpaymentNum.toLocaleString()} SDG إلى رصيد دائن مستحق للعميل ${customerName}`,
+          createdBy: user.name,
+          tx,
+          lines: [
+            {
+              accountId: customerLiabilitySdg.id,
+              currency: 'SDG',
+              debit: overpaymentNum,
+              credit: 0,
+              description: `إقفال فائض جلسة ${locked.sessionNumber}`,
+            },
+            {
+              accountId: customerLiabilitySdg.id,
+              currency: 'SDG',
+              debit: 0,
+              credit: overpaymentNum,
+              description: `قيد رصيد دائن دائم لصالح العميل ${customerName}`,
+            },
+          ],
+        });
+      }
+
+      // Update Session
+      const updated = await tx.customerSession.update({
+        where: { id: locked.id },
+        data: {
+          overpaymentSettled: true,
+          overpaymentAction: action,
+        },
+        include: { customer: true },
+      });
+
+      return {
+        session: updated,
+        overpaymentNum,
+        customerName,
+        sessionNumber: locked.sessionNumber,
+      };
     });
 
-    if (!session) {
-      return NextResponse.json({ error: 'الجلسة غير موجودة' }, { status: 404 });
-    }
-
-    const overpayment = new Decimal(session.overpaymentAmount.toString());
-    if (overpayment.lessThanOrEqualTo(0)) {
-      return NextResponse.json({ error: 'لا يوجد مبلغ فائض مسجل في هذه الجلسة لتسويته' }, { status: 400 });
-    }
-
-    if (session.overpaymentSettled) {
-      return NextResponse.json({ error: 'تمت تسوية فائض السداد لهذه الجلسة مسبقاً' }, { status: 400 });
-    }
-
-    const overpaymentNum = overpayment.toNumber();
-
-    // Accounts
-    const customerLiabilitySdg = await prisma.account.findFirst({ where: { accountCode: '2015' } });
-    const bankakAccount = await prisma.account.findFirst({ where: { accountCode: '1030' } });
-
-    if (!customerLiabilitySdg || !bankakAccount) {
-      throw new Error('حسابات وسيط التزامات العملاء أو بنكك غير مهيأة');
-    }
-
-    if (action === 'cash_refund') {
-      // Refund surplus SDG to customer via Bankak transfer
-      await postLedgerTransaction({
-        entryType: 'overpayment_refund',
-        referenceType: 'CustomerSession',
-        referenceId: session.id,
-        description: `استرداد فائض سداد ${overpaymentNum.toLocaleString()} SDG للعميل ${session.customer.name} (جلسة ${session.sessionNumber})`,
-        createdBy: user.name,
-        lines: [
-          {
-            accountId: customerLiabilitySdg.id,
-            currency: 'SDG',
-            debit: overpaymentNum,
-            credit: 0,
-            description: `إلغاء التزام الفائض للعميل ${session.customer.name}`,
-          },
-          {
-            accountId: bankakAccount.id,
-            currency: 'SDG',
-            debit: 0,
-            credit: overpaymentNum,
-            description: `تحويل استرداد فائض من حساب بنكك`,
-          },
-        ],
-      });
-    } else {
-      // Keep as permanent customer balance / general customer credit liability
-      await postLedgerTransaction({
-        entryType: 'overpayment_to_customer_credit',
-        referenceType: 'CustomerSession',
-        referenceId: session.id,
-        description: `ترحيل فائض سداد ${overpaymentNum.toLocaleString()} SDG إلى رصيد دائن مستحق للعميل ${session.customer.name}`,
-        createdBy: user.name,
-        lines: [
-          {
-            accountId: customerLiabilitySdg.id,
-            currency: 'SDG',
-            debit: overpaymentNum,
-            credit: 0,
-            description: `إقفال فائض جلسة ${session.sessionNumber}`,
-          },
-          {
-            accountId: customerLiabilitySdg.id,
-            currency: 'SDG',
-            debit: 0,
-            credit: overpaymentNum,
-            description: `قيد رصيد دائن دائم لصالح العميل ${session.customer.name}`,
-          },
-        ],
-      });
-    }
-
-    // Update Session
-    const updated = await prisma.customerSession.update({
-      where: { id: session.id },
-      data: {
-        overpaymentSettled: true,
-        overpaymentAction: action,
-      },
-      include: { customer: true },
-    });
-
-    // Audit log
+    // Audit log (Post-Transaction)
     await logAuditEvent({
       userId: user.userId,
       action: 'SETTLE_OVERPAYMENT',
       entityType: 'CustomerSession',
-      entityId: session.id,
-      newValues: { overpaymentAmount: overpaymentNum, action, notes },
-      reason: `تسوية فائض سداد جلسة ${session.sessionNumber} بإجراء ${action}`,
+      entityId: result.session.id,
+      newValues: { overpaymentAmount: result.overpaymentNum, action, notes },
+      reason: `تسوية فائض سداد جلسة ${result.sessionNumber} بإجراء ${action}`,
     });
 
     // Notification
     await createNotification({
       type: 'overpayment_detected',
       title: 'تمت تسوية فائض السداد بنجاح',
-      message: `تمت تسوية فائض مبلغ ${overpaymentNum.toLocaleString()} SDG للعميل ${session.customer.name} بإجراء: ${action === 'cash_refund' ? 'استرداد نقدي' : 'ترحيل إلى رصيد العميل'}`,
+      message: `تمت تسوية فائض مبلغ ${result.overpaymentNum.toLocaleString()} SDG للعميل ${result.customerName} بإجراء: ${action === 'cash_refund' ? 'استرداد نقدي' : 'ترحيل إلى رصيد العميل'}`,
       referenceType: 'CustomerSession',
-      referenceId: session.id,
+      referenceId: result.session.id,
       recipientRole: 'accountant',
       priority: 'normal',
     });
@@ -139,7 +154,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       message: 'تمت تسوية فائض السداد بنجاح وتسجيل الأثر المحاسبي',
-      data: updated,
+      data: result.session,
     });
   } catch (error: any) {
     console.error('Error settling overpayment:', error);

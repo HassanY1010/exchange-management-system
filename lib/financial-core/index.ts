@@ -76,6 +76,7 @@ export interface SessionBalanceInput {
   exchangeRate: number;       // e.g. 200 SDG/EGP
   approvedReceiptsTotalSdg: number; // e.g. 20,000,000 SDG
   deliveredEgpAmount: number; // e.g. 100,000 EGP
+  overpaymentSettled?: boolean;
 }
 
 export interface SessionBalanceResult {
@@ -122,7 +123,7 @@ export function calculateSessionBalance(input: SessionBalanceInput): SessionBala
 
   const isFullyPaid = dReceivedSdg.greaterThanOrEqualTo(expectedSdg.minus(0.0001));
   const isFullyDelivered = remainingEgp.lessThanOrEqualTo(0.0001);
-  const isCompleted = isFullyPaid && isFullyDelivered;
+  const isCompleted = isFullyPaid && isFullyDelivered && (!isOverpaid || input.overpaymentSettled === true);
 
   let status: SessionBalanceResult['status'] = 'open';
   if (isCompleted) {
@@ -149,6 +150,57 @@ export function calculateSessionBalance(input: SessionBalanceInput): SessionBala
     isCompleted,
     status,
   };
+}
+
+export interface SessionClosureValidation {
+  canClose: boolean;
+  reason?: string;
+}
+
+export function validateSessionClosure(session: {
+  status: string;
+  requestedAmount: number | string | Decimal;
+  expectedAmount: number | string | Decimal;
+  receivedAmount: number | string | Decimal;
+  deliveredAmount: number | string | Decimal;
+  overpaymentAmount?: number | string | Decimal;
+  overpaymentSettled?: boolean;
+}): SessionClosureValidation {
+  if (session.status === 'completed') {
+    return { canClose: false, reason: 'الجلسة مغلقة ومكتملة مسبقاً' };
+  }
+  if (session.status === 'cancelled') {
+    return { canClose: false, reason: 'لا يمكن إغلاق جلسة ملغاة' };
+  }
+
+  const dExpected = new Decimal(session.expectedAmount.toString());
+  const dReceived = new Decimal(session.receivedAmount.toString());
+  const dRequested = new Decimal(session.requestedAmount.toString());
+  const dDelivered = new Decimal(session.deliveredAmount.toString());
+  const dOverpayment = new Decimal(session.overpaymentAmount?.toString() || '0');
+
+  if (dReceived.lessThan(dExpected.minus(0.0001))) {
+    return {
+      canClose: false,
+      reason: `لا يمكن إغلاق الجلسة قبل استيفاء كامل المبالغ المطلوبة بالسوداني. المستلم المعتمد: ${dReceived.toFixed(2)} SDG، والمطلوب: ${dExpected.toFixed(2)} SDG`,
+    };
+  }
+
+  if (dDelivered.lessThan(dRequested.minus(0.0001))) {
+    return {
+      canClose: false,
+      reason: `لا يمكن إغلاق الجلسة قبل تسليم كامل المبلغ بالجنيه المصري للعميل. المسلّم: ${dDelivered.toFixed(2)} EGP، والمطلوب: ${dRequested.toFixed(2)} EGP`,
+    };
+  }
+
+  if (dOverpayment.greaterThan(0.0001) && !session.overpaymentSettled) {
+    return {
+      canClose: false,
+      reason: `يوجد فائض سداد للعميل بمبلغ ${dOverpayment.toFixed(2)} SDG لم تتم تسويته محاسبياً بعد. يرجى تسوية الفائض أولاً`,
+    };
+  }
+
+  return { canClose: true };
 }
 
 /**
