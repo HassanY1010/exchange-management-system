@@ -15,7 +15,7 @@ const prisma = new PrismaClient();
 
 async function runOcrPerformanceTests() {
   console.log('========================================================================================');
-  console.log('  فحص واختبار أداء وسرعة محرك الـ OCR وإعادة استخدام الـ Worker (OCR Performance Audit)   ');
+  console.log('  فحص واختبار أداء وسرعة محرك الـ OCR الحقيقي (Real Production OCR Performance Audit)    ');
   console.log('========================================================================================\n');
 
   let passed = 0;
@@ -34,14 +34,17 @@ async function runOcrPerformanceTests() {
     }
   }
 
-  // --- 1. التحقق من وجود ملفات اللغة السريعة محلياً وعدم الاعتماد على CDN ---
-  console.log('--- 1. فحص حزمة ملفات اللغة السريعة المحلية (Local Fast Tessdata) ---');
+  // --- 1. التحقق من وجود ملفات اللغة السريعة محلياً (Raw + Gzip) ---
+  console.log('--- 1. فحص حزمة ملفات النماذج المحلية في lib/ocr/tessdata ---');
   const tessdataDir = path.join(process.cwd(), 'lib', 'ocr', 'tessdata');
   const araExists = fs.existsSync(path.join(tessdataDir, 'ara.traineddata'));
   const engExists = fs.existsSync(path.join(tessdataDir, 'eng.traineddata'));
+  const araGzExists = fs.existsSync(path.join(tessdataDir, 'ara.traineddata.gz'));
+  const engGzExists = fs.existsSync(path.join(tessdataDir, 'eng.traineddata.gz'));
+  
   assert(
-    araExists && engExists,
-    'تضمين ملفات النماذج السريعة (ara + eng) محلياً داخل المشروع لتفادي التحميل من CDN'
+    araExists && engExists && araGzExists && engGzExists,
+    'تضمين ملفات النماذج السريعة بصيغتيها (raw + gz) محلياً داخل المشروع لضمان التوافق التام على Render'
   );
 
   const araSize = fs.statSync(path.join(tessdataDir, 'ara.traineddata')).size;
@@ -52,54 +55,61 @@ async function runOcrPerformanceTests() {
     `حجم النماذج السريعة الكلي (${totalMb} MB) خفيف جداً مقارنة بنموذج Best القديم (57 MB)`
   );
 
-  // --- 2. اختبار إعادة استخدام الـ Worker والسرعة الفائقة ---
-  console.log('\n--- 2. اختبار إعادة استخدام الـ Worker ومقارنة الأزمنة (Worker Reuse) ---');
-  const validPngBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  // --- 2. اختبار OCR حقيقي على صورة إشعار بنكك (800x600) ---
+  console.log('\n--- 2. اختبار OCR حقيقي على صورة إشعار بنكك وقياس زمن الاستخراج الفعلي ---');
+  const sampleImgPath = path.join(process.cwd(), 'test-receipt-sample.png');
+  const sampleImgBuffer = fs.readFileSync(sampleImgPath);
+  const sampleImgBase64 = `data:image/png;base64,${sampleImgBuffer.toString('base64')}`;
 
-  // Request 1: Initialization + Recognition
-  const t0 = performance.now();
-  const res1 = await processReceiptImageWithOcr(validPngBase64);
-  const dur1 = performance.now() - t0;
+  // Call 1: Real OCR on Real Image (Worker Init + Recognition)
+  const tReal0 = performance.now();
+  const realRes1 = await processReceiptImageWithOcr(sampleImgBase64);
+  const durReal1 = performance.now() - tReal0;
+  
   assert(
-    dur1 < 15000,
-    `الطلب الأول (تشغيل وتهيئة الـ Worker لأول مرة) استغرق: ${dur1.toFixed(1)} ms`
+    realRes1.engineUsed === 'tesseract' && realRes1.rawText.includes('987654321'),
+    `التعرف الضوئي الفعلي عبر Tesseract على صورة 800x600 استغرق: ${durReal1.toFixed(1)} ms`,
+    `الرقم المستخرج: ${realRes1.parsed.transactionId} | المبلغ: ${realRes1.parsed.amount} | الثقة: ${realRes1.parsed.ocrConfidence}%`
   );
 
-  // Request 2: Reused Worker (Must be dramatically faster)
-  const t1 = performance.now();
-  const res2 = await processReceiptImageWithOcr(validPngBase64);
-  const dur2 = performance.now() - t1;
+  // Call 2: Real OCR with Reused Worker (No init overhead)
+  const tReal1 = performance.now();
+  const realRes2 = await processReceiptImageWithOcr(sampleImgBase64);
+  const durReal2 = performance.now() - tReal1;
+
   assert(
-    dur2 < 2000,
-    `الطلب الثاني (إعادة استخدام الـ Worker المحمّل) فائق السرعة واستغرق: ${dur2.toFixed(1)} ms`
+    realRes2.engineUsed === 'tesseract' && durReal2 < durReal1,
+    `إعادة استخدام الـ Worker على نفس الصورة استغرق: ${durReal2.toFixed(1)} ms (تسريع بنسبة ${Math.round((1 - durReal2/durReal1) * 100)}%)`
   );
 
-  // Request 3: Third sequential call
-  const t2 = performance.now();
-  const res3 = await processReceiptImageWithOcr(validPngBase64);
-  const dur3 = performance.now() - t2;
+  // --- 3. قياس حمل الـ Worker Manager (Dispatch Overhead على صورة فارغة 1x1) ---
+  console.log('\n--- 3. قياس الحمل الأدنى لإدارة الطابور (Worker Dispatch Overhead) ---');
+  const blankPngBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const tDispatch = performance.now();
+  const blankRes = await processReceiptImageWithOcr(blankPngBase64);
+  const durDispatch = performance.now() - tDispatch;
+
   assert(
-    dur3 < 2000,
-    `الطلب الثالث (استقرار الأداء دون تسريب أو إعادة تحميل) استغرق: ${dur3.toFixed(1)} ms`
+    blankRes.engineUsed === 'tesseract' && durDispatch < 500,
+    `زمن إرسال وفحص صورة فارغة عبر الـ Worker النشط: ${durDispatch.toFixed(1)} ms`
   );
 
-  // --- 3. اختبار التزامن وقفل الطابور (Concurrency & Queue Mutex) ---
-  console.log('\n--- 3. اختبار التزامن ومنع تداخل ومعالجة المهام المتوازية (Queue Serialization) ---');
+  // --- 4. اختبار التزامن وقفل الطابور (Concurrency & Queue Mutex) على صور حقيقية ---
+  console.log('\n--- 4. اختبار التزامن ومنع تداخل المهام المتوازية عبر الطابور التسلسلي ---');
   const tConcurrentStart = performance.now();
-  const [c1, c2, c3] = await Promise.all([
-    processReceiptImageWithOcr(validPngBase64),
-    processReceiptImageWithOcr(validPngBase64),
-    processReceiptImageWithOcr(validPngBase64),
+  const [c1, c2] = await Promise.all([
+    processReceiptImageWithOcr(sampleImgBase64),
+    processReceiptImageWithOcr(sampleImgBase64),
   ]);
   const durConcurrent = performance.now() - tConcurrentStart;
+
   assert(
-    Boolean(c1 && c2 && c3),
-    `نجاح معالجة 3 طلبات متزامنة في نفس اللحظة بأمان تام عبر الطابور التسلسلي خلال: ${durConcurrent.toFixed(1)} ms`
+    c1.engineUsed === 'tesseract' && c2.engineUsed === 'tesseract',
+    `نجاح معالجة طلبين متزامنين على صور حقيقية بأمان تام وتسلسلهما عبر Mutex خلال: ${durConcurrent.toFixed(1)} ms`
   );
 
-  // --- 4. اختبار التعافي من الفشل وحماية الـ Timeout ---
-  console.log('\n--- 4. اختبار حماية التايم آوت والتعافي التلقائي (Timeout & Recovery) ---');
-  // Attempt with corrupt buffer
+  // --- 5. اختبار التعافي من الفشل وحماية الـ Timeout ---
+  console.log('\n--- 5. اختبار حماية التايم آوت والتعافي التلقائي (Timeout & Recovery) ---');
   const corruptedBuffer = Buffer.from('not-a-valid-image-corrupted-bytes-12345');
   const failRes = await processReceiptImageWithOcr(corruptedBuffer);
   assert(
@@ -108,14 +118,14 @@ async function runOcrPerformanceTests() {
   );
 
   // Next normal request must succeed immediately because worker was recycled / preserved
-  const recoverRes = await processReceiptImageWithOcr(validPngBase64);
+  const recoverRes = await processReceiptImageWithOcr(sampleImgBase64);
   assert(
-    recoverRes.durationMs < 5000,
+    recoverRes.engineUsed === 'tesseract' && recoverRes.durationMs < 10000,
     'استمرار الـ Worker في العمل والتعافي الفوري بعد معالجة ملف خاطئ'
   );
 
-  // --- 5. اختبار الأثر المالي والنزاهة المحاسبية عبر دورة الرفع الكاملة ---
-  console.log('\n--- 5. اختبار النزاهة المحاسبية والتوازي في الرفع (Upload & Accounting Integrity) ---');
+  // --- 6. اختبار الأثر المالي والنزاهة المحاسبية ورفع API بدون نص مسبق ---
+  console.log('\n--- 6. اختبار النزاهة المحاسبية والتوازي في API الرفع الحقيقي ---');
   const tokenAccountant = generateToken({ userId: 'u-perf-acct', email: 'acct@exchange.local', name: 'المحاسب المالي', role: 'accountant' });
 
   const testCustomer = await prisma.customer.upsert({
@@ -136,8 +146,7 @@ async function runOcrPerformanceTests() {
       customerId: testCustomer.id,
       transactionId: `TXN-PERF-${Date.now()}`,
       amount: 3500000,
-      imageData: validPngBase64 + Buffer.from('perf-unique-' + Date.now()).toString('base64'),
-      rawOcrText: 'Bank of Khartoum\nTransaction ID: TXN-PERF\nAmount: 3,500,000 SDG\nSender: حاتم إبراهيم',
+      imageData: sampleImgBase64, // Real image, NO preExtractedText -> forces real Tesseract OCR
     }),
   });
 
@@ -149,7 +158,7 @@ async function runOcrPerformanceTests() {
 
   assert(
     upRes.status === 201 && upJson.success,
-    `نجاح عملية الرفع بالتوازي (التخزين + التحليل + الحفظ) في: ${durUpload.toFixed(1)} ms`
+    `نجاح عملية الرفع بالتوازي والـ OCR الفعلي خلال: ${durUpload.toFixed(1)} ms`
   );
 
   // Ensure ZERO ledger entries were created before explicit approval
@@ -175,6 +184,8 @@ async function runOcrPerformanceTests() {
     appRes.status === 200,
     'الاعتماد المالي الصريح فقط هو ما ينشئ القيود المحاسبية'
   );
+
+  await ocrWorkerManager.recycleWorker();
 
   console.log('\n========================================================================================');
   console.log(`  🏆 نجحت جميع اختبارات الأداء والسرعة والنزاهة المحاسبية: ${passed} من أصل ${total} بنسبة 100%!`);

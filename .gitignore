@@ -15,5 +15,6 @@ yarn-error.log*
 *.tsbuildinfo
 *.traineddata
 !lib/ocr/tessdata/*.traineddata
+!lib/ocr/tessdata/*.traineddata.gz
 backups/
 public/uploads/

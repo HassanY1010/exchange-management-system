@@ -50,6 +50,7 @@ class OcrWorkerManager {
       const w = await createWorker(['ara', 'eng'], 1, {
         langPath,
         cachePath: cacheDir,
+        gzip: false,
         errorHandler: (err) => console.warn('[OCR Worker Notice]:', err),
       });
 
@@ -66,7 +67,7 @@ class OcrWorkerManager {
 
   public async recognizeWithTimeout(imageInput: Buffer, timeoutMs = 15000): Promise<string> {
     return new Promise((resolve, reject) => {
-      this.queue = this.queue.then(async () => {
+      this.queue = this.queue.catch(() => {}).then(async () => {
         let timer: NodeJS.Timeout | null = null;
         try {
           const worker = await this.getWorker();
