@@ -1,6 +1,6 @@
 import Redis from 'ioredis';
 
-const redisUrl = process.env.REDIS_URL || '';
+const redisUrl = process.env.REDIS_URL || 'rediss://default:gQAAAAAAAW9lAAIgcDExMWRmZjY2YzBkMmE0MjI5YTdkZWNhYzVjZDBiYTI5NQ@exact-prawn-94053.upstash.io:6379';
 
 let redisClient: Redis | null = null;
 

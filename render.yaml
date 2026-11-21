@@ -21,7 +21,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: REDIS_URL
-        sync: false
+        value: rediss://default:gQAAAAAAAW9lAAIgcDExMWRmZjY2YzBkMmE0MjI5YTdkZWNhYzVjZDBiYTI5NQ@exact-prawn-94053.upstash.io:6379
       - key: NEXT_PUBLIC_SUPABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
