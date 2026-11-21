@@ -121,8 +121,8 @@ export function calculateSessionBalance(input: SessionBalanceInput): SessionBala
 
   const remainingEgp = dRequestedEgp.minus(dDeliveredEgp);
 
-  const isFullyPaid = dReceivedSdg.greaterThanOrEqualTo(expectedSdg.minus(0.0001));
-  const isFullyDelivered = remainingEgp.lessThanOrEqualTo(0.0001);
+  const isFullyPaid = dRequestedEgp.greaterThan(0) && dReceivedSdg.greaterThanOrEqualTo(expectedSdg.minus(0.0001));
+  const isFullyDelivered = dRequestedEgp.greaterThan(0) && dDeliveredEgp.greaterThanOrEqualTo(dRequestedEgp.minus(0.0001));
   const isCompleted = isFullyPaid && isFullyDelivered && (!isOverpaid || input.overpaymentSettled === true);
 
   let status: SessionBalanceResult['status'] = 'open';
@@ -131,6 +131,8 @@ export function calculateSessionBalance(input: SessionBalanceInput): SessionBala
   } else if (!isFullyPaid && isFullyDelivered) {
     status = 'pending_receipts';
   } else if (isFullyPaid && !isFullyDelivered) {
+    status = 'pending_delivery';
+  } else if (isFullyPaid && isFullyDelivered && isOverpaid && !input.overpaymentSettled) {
     status = 'pending_delivery';
   } else if (dReceivedSdg.greaterThan(0) || dDeliveredEgp.greaterThan(0)) {
     status = 'has_balance';

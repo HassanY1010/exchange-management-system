@@ -135,6 +135,7 @@ export async function POST(
         exchangeRate: Number(currentSession.exchangeRate),
         approvedReceiptsTotalSdg: newReceivedTotal,
         deliveredEgpAmount: Number(currentSession.deliveredAmount),
+        overpaymentSettled: currentSession.overpaymentSettled,
       });
 
       await prisma.customerSession.update({
@@ -144,6 +145,8 @@ export async function POST(
           remainingAmount: balanceCheck.remainingSdgAmount,
           overpaymentAmount: balanceCheck.overpaymentAmount,
           status: balanceCheck.status,
+          closedAt: balanceCheck.status === 'completed' ? new Date() : null,
+          closedBy: balanceCheck.status === 'completed' ? user.name : null,
         },
       });
 

@@ -377,6 +377,171 @@ async function runSessionAuditTests() {
     `كود المنع: ${resPayoutCancelled.status}`
   );
 
+  console.log('\n--- 7. فحص القفل المتزامن لحساب الصندوق عبر جلسات متعددة (Cross-Session Safe Concurrency Lock) ---');
+
+  // Test 20: Cross-session Safe Overdraft Prevention
+  // We create a temporary dedicated Cash Safe Account with a strictly limited balance: 10,000 EGP
+  const tempSafe = await prisma.account.create({
+    data: {
+      accountCode: `SAFE-TEMP-${Date.now()}`,
+      name: 'خزينة فحص التزامن المحدودة',
+      accountType: 'cash_safe',
+      currency: 'EGP',
+      openingBalance: 10000,
+      currentBalance: 10000,
+      status: 'active',
+    },
+  });
+
+  // Create Session A (requires 8,000 EGP)
+  const resSesA = await callCreateSession({ customerId: testCustomer.id, requestedAmount: 8000, exchangeRate: 200 }, tokenAccountant);
+  const sesA = resSesA.data.data;
+  // Satisfy receipts for Session A (1,600,000 SDG)
+  const rcpA = await prisma.bankakReceipt.create({
+    data: {
+      receiptNumber: `RCP-A-${Date.now()}`,
+      transactionId: `TXN-A-${Date.now()}`,
+      customerId: testCustomer.id,
+      customerSessionId: sesA.id,
+      amount: 1600000,
+      currency: 'SDG',
+      imageStorageKey: 'no-image',
+      imageHash: `hash-a-${Date.now()}`,
+      status: 'verified',
+      createdBy: 'test_system',
+    },
+  });
+  const reqApproveA = new NextRequest(`http://localhost:3000/api/v1/receipts/${rcpA.id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },
+    body: JSON.stringify({ directVerification: true }),
+  });
+  await approveReceipt(reqApproveA, { params: { id: rcpA.id } });
+
+  // Create Session B (requires 6,000 EGP)
+  // Note: 8,000 + 6,000 = 14,000 EGP > 10,000 EGP (Safe Balance)
+  const resSesB = await callCreateSession({ customerId: testCustomer.id, requestedAmount: 6000, exchangeRate: 200 }, tokenAccountant);
+  const sesB = resSesB.data.data;
+  const rcpB = await prisma.bankakReceipt.create({
+    data: {
+      receiptNumber: `RCP-B-${Date.now()}`,
+      transactionId: `TXN-B-${Date.now()}`,
+      customerId: testCustomer.id,
+      customerSessionId: sesB.id,
+      amount: 1200000,
+      currency: 'SDG',
+      imageStorageKey: 'no-image',
+      imageHash: `hash-b-${Date.now()}`,
+      status: 'verified',
+      createdBy: 'test_system',
+    },
+  });
+  const reqApproveB = new NextRequest(`http://localhost:3000/api/v1/receipts/${rcpB.id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },
+    body: JSON.stringify({ directVerification: true }),
+  });
+  await approveReceipt(reqApproveB, { params: { id: rcpB.id } });
+
+  // Fire both payout requests simultaneously targeting the same tempSafe
+  const [payoutResultA, payoutResultB] = await Promise.all([
+    callDeliver(sesA.id, { amountEgp: 8000, accountId: tempSafe.id }),
+    callDeliver(sesB.id, { amountEgp: 6000, accountId: tempSafe.id }),
+  ]);
+
+  const oneSucceeded = (payoutResultA.status === 200 && payoutResultB.status !== 200) ||
+                       (payoutResultB.status === 200 && payoutResultA.status !== 200);
+
+  const updatedTempSafe = await prisma.account.findUnique({ where: { id: tempSafe.id } });
+  const finalSafeBalance = Number(updatedTempSafe?.currentBalance);
+
+  assert(
+    oneSucceeded && finalSafeBalance >= 0,
+    'قفل الحساب النقدي (Account SELECT FOR UPDATE) يمنع استنزاف رصيد الصندوق بالتزامن عبر جلسات مختلفة',
+    `نجح أحدهما ورُفض الآخر بنجاح. الرصيد المتبقي بالخزينة: ${finalSafeBalance} EGP (غير سالب)`
+  );
+
+  console.log('\n--- 8. فحص عدم تحول pending_receipts إلى completed إلا بعد التسليم والتسوية ---');
+
+  // Test 21: Verify that merely approving receipts when cash is NOT delivered does not produce 'completed'
+  const resSesUnpaid = await callCreateSession({ customerId: testCustomer.id, requestedAmount: 20000, exchangeRate: 200 }, tokenAccountant);
+  const sesUnpaid = resSesUnpaid.data.data;
+
+  // Add 100% receipts (4,000,000 SDG)
+  const rcpUnpaid = await prisma.bankakReceipt.create({
+    data: {
+      receiptNumber: `RCP-UNP-${Date.now()}`,
+      transactionId: `TXN-UNP-${Date.now()}`,
+      customerId: testCustomer.id,
+      customerSessionId: sesUnpaid.id,
+      amount: 4000000,
+      currency: 'SDG',
+      imageStorageKey: 'no-image',
+      imageHash: `hash-unp-${Date.now()}`,
+      status: 'verified',
+      createdBy: 'test_system',
+    },
+  });
+  const reqApproveUnp = new NextRequest(`http://localhost:3000/api/v1/receipts/${rcpUnpaid.id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },
+    body: JSON.stringify({ directVerification: true }),
+  });
+  await approveReceipt(reqApproveUnp, { params: { id: rcpUnpaid.id } });
+
+  const sesAfterReceiptsOnly = await prisma.customerSession.findUnique({ where: { id: sesUnpaid.id } });
+  assert(
+    sesAfterReceiptsOnly?.status === 'pending_delivery' && Number(sesAfterReceiptsOnly.deliveredAmount) === 0,
+    'اعتماد كامل الإيصالات بدون تسليم النقدية يجعل الجلسة pending_delivery ولا يحولها مطلقاً إلى completed',
+    `حالة الجلسة: ${sesAfterReceiptsOnly?.status} | المسلّم: ${sesAfterReceiptsOnly?.deliveredAmount} EGP`
+  );
+
+  // Test 22: Session with surplus + full cash delivered is NOT completed until overpayment is settled
+  const resSesSurplusDelivery = await callCreateSession({ customerId: testCustomer.id, requestedAmount: 10000, exchangeRate: 200 }, tokenAccountant);
+  const sesSurplusDelivery = resSesSurplusDelivery.data.data;
+
+  // Add Surplus receipt: 2,500,000 SDG (expected is 2,000,000 SDG -> surplus 500,000 SDG)
+  const rcpSurplusDel = await prisma.bankakReceipt.create({
+    data: {
+      receiptNumber: `RCP-SDEL-${Date.now()}`,
+      transactionId: `TXN-SDEL-${Date.now()}`,
+      customerId: testCustomer.id,
+      customerSessionId: sesSurplusDelivery.id,
+      amount: 2500000,
+      currency: 'SDG',
+      imageStorageKey: 'no-image',
+      imageHash: `hash-sdel-${Date.now()}`,
+      status: 'verified',
+      createdBy: 'test_system',
+    },
+  });
+  const reqApproveSDel = new NextRequest(`http://localhost:3000/api/v1/receipts/${rcpSurplusDel.id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },
+    body: JSON.stringify({ directVerification: true }),
+  });
+  await approveReceipt(reqApproveSDel, { params: { id: rcpSurplusDel.id } });
+
+  // Deliver full cash 10,000 EGP
+  await callDeliver(sesSurplusDelivery.id, { amountEgp: 10000 });
+
+  const sesBeforeSettle = await prisma.customerSession.findUnique({ where: { id: sesSurplusDelivery.id } });
+  assert(
+    sesBeforeSettle?.status !== 'completed' && Number(sesBeforeSettle?.overpaymentAmount) === 500000,
+    'اكتمال تسليم النقدية مع وجود فائض سداد غير مسوّى يحجب الحالة completed حتى تتم التسوية',
+    `حالة الجلسة: ${sesBeforeSettle?.status} | الفائض المعلق: ${sesBeforeSettle?.overpaymentAmount} SDG`
+  );
+
+  // Now settle the overpayment
+  const resSettleSDel = await callSettle(sesSurplusDelivery.id, { action: 'credit_balance' });
+  const sesAfterSettle = await prisma.customerSession.findUnique({ where: { id: sesSurplusDelivery.id } });
+
+  assert(
+    resSettleSDel.status === 200 && sesAfterSettle?.status === 'completed' && sesAfterSettle?.overpaymentSettled === true,
+    'بمجرد تسوية فائض السداد بنجاح، تتحول الجلسة المستوفية للنقدية فورياً إلى completed ومقفلة رسمياً',
+    `الحالة النهائية: ${sesAfterSettle?.status} | تمت التسوية: ${sesAfterSettle?.overpaymentSettled}`
+  );
+
   console.log('\n========================================================================================');
   console.log(`  🏆 اجتازت جميع الاختبارات بنجاح كامل! (${passed} من ${total} اختبارات ناجحة)`);
   console.log('========================================================================================\n');

@@ -26,10 +26,10 @@ export async function POST(
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const lockedRows = await tx.$queryRawUnsafe<any[]>(
-        'SELECT id, "overpaymentAmount", "overpaymentSettled", "sessionNumber", "customerId" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+      const lockedRows = (await tx.$queryRawUnsafe(
+        'SELECT id, "overpaymentAmount", "overpaymentSettled", "sessionNumber", "customerId", "requestedAmount", "expectedAmount", "receivedAmount", "deliveredAmount", "status" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
         params.id
-      );
+      )) as any[];
 
       if (!lockedRows || lockedRows.length === 0) {
         throw new Error('الجلسة غير موجودة');
@@ -112,12 +112,24 @@ export async function POST(
         });
       }
 
+      const dRequested = new Decimal(locked.requestedAmount?.toString() || '0');
+      const dDelivered = new Decimal(locked.deliveredAmount?.toString() || '0');
+      const dExpected = new Decimal(locked.expectedAmount?.toString() || '0');
+      const dReceived = new Decimal(locked.receivedAmount?.toString() || '0');
+
+      const isFullyDelivered = dRequested.greaterThan(0) && dDelivered.greaterThanOrEqualTo(dRequested.minus(0.0001));
+      const isFullyPaid = dExpected.greaterThan(0) && dReceived.greaterThanOrEqualTo(dExpected.minus(0.0001));
+      const nextStatus = (isFullyDelivered && isFullyPaid) ? 'completed' : locked.status;
+
       // Update Session
       const updated = await tx.customerSession.update({
         where: { id: locked.id },
         data: {
           overpaymentSettled: true,
           overpaymentAction: action,
+          status: nextStatus,
+          closedAt: nextStatus === 'completed' ? new Date() : null,
+          closedBy: nextStatus === 'completed' ? user.name : null,
         },
         include: { customer: true },
       });

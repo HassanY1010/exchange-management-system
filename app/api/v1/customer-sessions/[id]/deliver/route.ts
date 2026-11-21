@@ -88,24 +88,35 @@ export async function POST(
       }
 
       // Determine cash delivery source account (safe 1010 or specific custody)
-      let sourceAccount = null;
-      if (accountId) {
-        sourceAccount = await tx.account.findUnique({ where: { id: accountId } });
-      } else {
-        sourceAccount = await tx.account.findFirst({
-          where: { accountCode: '1010' }, // Main EGP Safe
+      let targetAccountId = accountId;
+      if (!targetAccountId) {
+        const defaultSafe = await tx.account.findFirst({
+          where: { accountCode: '1010' },
+          select: { id: true },
         });
+        if (!defaultSafe) {
+          throw new Error('حساب الصندوق النقدي المصري (1010) غير مهيأ في الدليل');
+        }
+        targetAccountId = defaultSafe.id;
       }
 
-      if (!sourceAccount) {
-        throw new Error('حساب الصندوق النقدي المصري غير موجود');
+      // Explicit row-level lock on the Cash Account across ALL concurrent sessions to prevent over-drafting the safe
+      const lockedAccountRows = (await tx.$queryRawUnsafe(
+        'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance" FROM "Account" WHERE id = $1 FOR UPDATE',
+        targetAccountId
+      )) as any[];
+
+      if (!lockedAccountRows || lockedAccountRows.length === 0) {
+        throw new Error('حساب الصندوق النقدي غير موجود');
       }
+
+      const sourceAccount = lockedAccountRows[0];
 
       if (sourceAccount.currency !== 'EGP') {
         throw new Error(`حساب الصرف النقدي (${sourceAccount.name}) يجب أن يكون بالجنيه المصري (EGP)، بينما حسابه بالـ (${sourceAccount.currency})`);
       }
 
-      // Pre-verify source account balance before attempting ledger posting
+      // Pre-verify source account balance from the freshly locked row
       const currentSafeBalance = new Decimal(sourceAccount.currentBalance.toString());
       if (currentSafeBalance.lessThan(amountEgp)) {
         throw new Error(
@@ -211,12 +222,25 @@ export async function POST(
       const newDelivered = Number(locked.deliveredAmount) + amountEgp;
       const requestedAmount = Number(locked.requestedAmount);
       const isNowFullyDelivered = newDelivered >= requestedAmount;
+      const isNowFullyPaid = new Decimal(locked.receivedAmount.toString()).greaterThanOrEqualTo(new Decimal(locked.expectedAmount.toString()).minus(0.0001));
       const hasUnsettledOverpayment = Number(locked.overpaymentAmount || 0) > 0 && !locked.overpaymentSettled;
 
       // Only mark completed if fully delivered, fully paid, AND overpayment settled (if any)
-      const nextStatus = isNowFullyDelivered
-        ? (hasUnsettledOverpayment ? 'pending_delivery' : 'completed')
-        : 'partially_delivered';
+      let nextStatus = 'partially_delivered';
+      if (isNowFullyDelivered && isNowFullyPaid && !hasUnsettledOverpayment) {
+        nextStatus = 'completed';
+      } else if (isNowFullyDelivered && !isNowFullyPaid) {
+        // Cash was delivered (exceptional payout), but receipts are still pending
+        nextStatus = 'pending_receipts';
+      } else if (!isNowFullyDelivered && isNowFullyPaid) {
+        // Receipts are complete, but cash was only partially delivered
+        nextStatus = 'partially_delivered';
+      } else if (hasUnsettledOverpayment) {
+        // Both paid and delivered, but excess surplus requires settlement first
+        nextStatus = 'pending_delivery';
+      } else {
+        nextStatus = 'partially_delivered';
+      }
 
       const updatedSession = await tx.customerSession.update({
         where: { id: locked.id },
