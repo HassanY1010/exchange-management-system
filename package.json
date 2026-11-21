@@ -5,9 +5,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:seed": "node scripts/seed.mjs",
@@ -15,9 +16,11 @@
   },
   "dependencies": {
     "@prisma/client": "^5.21.1",
+    "@supabase/supabase-js": "^2.109.0",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "decimal.js": "^10.4.3",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.454.0",
     "next": "^14.2.18",

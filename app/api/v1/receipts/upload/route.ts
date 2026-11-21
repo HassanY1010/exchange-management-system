@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { parseBankakReceiptText, computeImageHash } from '@/lib/ocr/bankak-parser';
 import { processReceiptImageWithOcr } from '@/lib/ocr/image-ocr';
+import { uploadReceiptImage } from '@/lib/storage/supabase-storage';
 import { logAuditEvent } from '@/lib/audit';
 
 export async function POST(req: NextRequest) {
@@ -64,6 +65,13 @@ export async function POST(req: NextRequest) {
 
       const receiptNumber = `RCP-${Date.now()}-${i + 1}`;
 
+      // Upload to Supabase Storage if configured (fallback to local reference)
+      let imageStorageKey = 'no-image';
+      if (imageData) {
+        const uploadResult = await uploadReceiptImage(imageData, `rcp-${Date.now()}-${transactionId}.png`);
+        imageStorageKey = uploadResult.publicUrl || uploadResult.storageKey;
+      }
+
       const receipt = await prisma.bankakReceipt.create({
         data: {
           receiptNumber,
@@ -81,7 +89,7 @@ export async function POST(req: NextRequest) {
           bankName: 'بنكك - بنك الخرطوم',
           ocrText: rawOcrText || parsed.rawText,
           ocrConfidence: parsed.ocrConfidence,
-          imageStorageKey: imageData ? (imageData.length > 500 ? imageData.substring(0, 500) : imageData) : 'no-image',
+          imageStorageKey,
           imageHash,
           status,
           duplicateOfId,
