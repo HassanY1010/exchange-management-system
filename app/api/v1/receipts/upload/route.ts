@@ -11,15 +11,41 @@ export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  const allowedRoles = ['admin', 'accountant', 'data_entry', 'bankak_auditor'];
+  if (!allowedRoles.includes(user.role)) {
+    return NextResponse.json(
+      { error: 'غير مصرح لك برفع إيصالات بنكك. الصلاحية مقتصرة على موظفي الإدخال، المحاسبين، أو الإدارة' },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await req.json();
     // Support either single object or array of receipts
     const items = Array.isArray(body.items) ? body.items : [body];
 
+    if (!items || items.length === 0) {
+      return NextResponse.json({ error: 'لم يتم توفير أي إيصالات للرفع' }, { status: 400 });
+    }
+
+    if (items.length > 50) {
+      return NextResponse.json({ error: 'الحد الأقصى لرفع الإيصالات في الدفعة الواحدة هو 50 إيصال' }, { status: 400 });
+    }
+
     const results = [];
 
     // Pre-fetch all non-rejected receipts for multi-attribute risk and duplicate evaluation
-    const existingReceipts = await prisma.bankakReceipt.findMany({
+    const existingReceipts: Array<{
+      id: string;
+      receiptNumber?: string;
+      transactionId: string;
+      imageHash: string;
+      amount: any;
+      transactionDate?: string | null;
+      senderName?: string | null;
+      status: string;
+      customer?: { name: string } | null;
+    }> = await prisma.bankakReceipt.findMany({
       where: {
         status: { not: 'rejected' },
       },
@@ -45,6 +71,44 @@ export async function POST(req: NextRequest) {
         rawOcrText, // optional pre-extracted text
       } = item;
 
+      // File & Payload Validation: check base64 format and size
+      if (imageData && typeof imageData === 'string') {
+        if (imageData.startsWith('data:')) {
+          const match = imageData.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9\-\+\.]+);base64,/);
+          if (match) {
+            const mime = match[1].toLowerCase();
+            const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
+            if (!allowedMimes.includes(mime)) {
+              return NextResponse.json(
+                { error: `نوع الملف (${mime}) غير مدعوم. يرجى رفع صور بصيغة PNG أو JPG أو WebP أو PDF` },
+                { status: 400 }
+              );
+            }
+          }
+        }
+        // Limit base64 length to ~15MB to prevent memory exhaustion / DoS
+        if (imageData.length > 20 * 1024 * 1024) {
+          return NextResponse.json(
+            { error: 'حجم صورة الإيصال يتجاوز الحد الأقصى المسموح به (15 ميغابايت)' },
+            { status: 400 }
+          );
+        }
+      }
+
+      // If linked to a session, verify session is not cancelled
+      if (customerSessionId) {
+        const session = await prisma.customerSession.findUnique({
+          where: { id: customerSessionId },
+          select: { status: true },
+        });
+        if (session && session.status === 'cancelled') {
+          return NextResponse.json(
+            { error: 'لا يمكن ربط إيصال بجلسة حسابية ملغاة' },
+            { status: 400 }
+          );
+        }
+      }
+
       // Perform OCR and hash computation using Tesseract.js / Heuristic engine
       const ocrResult = await processReceiptImageWithOcr(
         imageData || `synthetic-${Date.now()}-${i}`,
@@ -54,16 +118,16 @@ export async function POST(req: NextRequest) {
       const parsed = ocrResult.parsed;
 
       // Override with user fields if explicitly provided
-      const transactionId = item.transactionId || parsed.transactionId;
+      const transactionId = (item.transactionId || parsed.transactionId || '').trim();
       const amount = item.amount !== undefined ? Number(item.amount) : parsed.amount;
-      const senderName = item.senderName || parsed.senderName;
-      const senderAccount = item.senderAccount || parsed.senderAccount;
-      const receiverName = item.receiverName || parsed.receiverName;
-      const receiverAccount = item.receiverAccount || parsed.receiverAccount;
+      const senderName = (item.senderName || parsed.senderName || '').trim();
+      const senderAccount = (item.senderAccount || parsed.senderAccount || '').trim();
+      const receiverName = (item.receiverName || parsed.receiverName || '').trim();
+      const receiverAccount = (item.receiverAccount || parsed.receiverAccount || '').trim();
       const transactionDate = item.transactionDate || parsed.transactionDate;
       const transactionTime = item.transactionTime || parsed.transactionTime;
 
-      // Comprehensive Anti-Fraud & Risk Assessment (Tier 1 Duplicate, Tier 2 Suspicious)
+      // Multi-attribute Anti-Fraud & Risk Assessment (Tier 1 Duplicate, Tier 2 Suspicious)
       const riskAssessment = evaluateReceiptRisk(
         {
           transactionId,
@@ -83,7 +147,7 @@ export async function POST(req: NextRequest) {
 
       const receiptNumber = `RCP-${Date.now()}-${i + 1}`;
 
-      // Upload to Supabase Storage if configured (fallback to local reference)
+      // Upload to Storage if configured
       let imageStorageKey = 'no-image';
       if (imageData) {
         const uploadResult = await uploadReceiptImage(imageData, `rcp-${Date.now()}-${transactionId}.png`);
@@ -119,6 +183,19 @@ export async function POST(req: NextRequest) {
           customer: true,
           customerSession: true,
         },
+      });
+
+      // Append newly created receipt to in-memory existing list for in-flight duplicate checks
+      existingReceipts.push({
+        id: receipt.id,
+        receiptNumber: receipt.receiptNumber,
+        transactionId: receipt.transactionId,
+        imageHash: receipt.imageHash,
+        amount: receipt.amount,
+        transactionDate: receipt.transactionDate,
+        senderName: receipt.senderName,
+        status: receipt.status,
+        customer: receipt.customer ? { name: receipt.customer.name } : null,
       });
 
       // Dispatch targeted contextual notifications

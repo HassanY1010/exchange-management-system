@@ -33,6 +33,20 @@ export async function processReceiptImageWithOcr(
     };
   }
 
+  // If input is a synthetic string or not a valid data URL/Buffer, skip Tesseract worker
+  const isDataUrl = typeof imageBufferOrBase64 === 'string' && imageBufferOrBase64.startsWith('data:image');
+  const isBuffer = Buffer.isBuffer(imageBufferOrBase64);
+  if (!isDataUrl && !isBuffer) {
+    const parsed = parseBankakReceiptText(typeof imageBufferOrBase64 === 'string' ? imageBufferOrBase64 : '');
+    return {
+      parsed,
+      imageHash,
+      rawText: typeof imageBufferOrBase64 === 'string' ? imageBufferOrBase64 : '',
+      engineUsed: 'heuristic_parser',
+      durationMs: Date.now() - startTime,
+    };
+  }
+
   try {
     // Initialize Tesseract OCR worker with Arabic and English
     const worker = await createWorker(['ara', 'eng'], 1, {

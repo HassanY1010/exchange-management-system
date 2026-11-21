@@ -12,7 +12,8 @@ export async function POST(
   if (!user) return authError();
 
   // Any verified personnel can record bank account verification
-  if (!['admin', 'accountant', 'data_entry', 'custody_officer'].includes(user.role)) {
+  const allowedRoles = ['admin', 'accountant', 'data_entry', 'custody_officer', 'bankak_auditor'];
+  if (!allowedRoles.includes(user.role)) {
     return NextResponse.json({ error: 'غير مصرح لك بتنفيذ التحقق البنكي من الإيصالات' }, { status: 403 });
   }
 
@@ -100,6 +101,6 @@ export async function POST(
     });
   } catch (error: any) {
     console.error('Error verifying receipt:', error);
-    return NextResponse.json({ error: error.message || 'خطأ في عملية التحقق البنكي' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'خطأ في عملية التحقق البنكي' }, { status: 400 });
   }
 }

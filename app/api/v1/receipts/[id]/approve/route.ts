@@ -21,8 +21,9 @@ export async function POST(
     const body = await req.json().catch(() => ({}));
     const { directVerification = false } = body;
 
-    // Atomic row-level lock and idempotency check
-    const receipt = await prisma.$transaction(async (tx) => {
+    // Single fully atomic financial transaction
+    const { receipt, balanceCheck, linkedSession } = await prisma.$transaction(async (tx) => {
+      // 1. Atomic row-level lock and idempotency check
       const locked = await tx.$queryRawUnsafe<any[]>(
         'SELECT id, "status", "amount", "transactionId", "customerId", "customerSessionId", "verifiedBy" FROM "BankakReceipt" WHERE id = $1 FOR UPDATE',
         params.id
@@ -41,13 +42,17 @@ export async function POST(
       }
 
       // Prohibit approving receipt for a cancelled customer session
+      let currentSession: any = null;
       if (locked[0].customerSessionId) {
-        const linkedSession = await tx.customerSession.findUnique({
-          where: { id: locked[0].customerSessionId },
-          select: { status: true },
-        });
-        if (linkedSession && linkedSession.status === 'cancelled') {
-          throw new Error('لا يمكن اعتماد إيصال مالي لجلسة حسابية ملغاة');
+        const lockedSessions = await tx.$queryRawUnsafe<any[]>(
+          'SELECT id, "status", "requestedAmount", "receivedAmount", "deliveredAmount", "exchangeRate", "overpaymentSettled", "sessionNumber" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+          locked[0].customerSessionId
+        );
+        if (lockedSessions && lockedSessions.length > 0) {
+          currentSession = lockedSessions[0];
+          if (currentSession.status === 'cancelled') {
+            throw new Error('لا يمكن اعتماد إيصال مالي لجلسة حسابية ملغاة');
+          }
         }
       }
 
@@ -69,95 +74,98 @@ export async function POST(
         updateData.verificationNotes = 'تم التحقق والاعتماد في خطوة واحدة بواسطة المسؤول المعتمد';
       }
 
-      await tx.bankakReceipt.update({
+      const updatedReceipt = await tx.bankakReceipt.update({
         where: { id: params.id },
         data: updateData,
-      });
-
-      return await tx.bankakReceipt.findUnique({
-        where: { id: params.id },
         include: { customer: true, customerSession: true },
       });
-    });
 
-    if (!receipt) {
-      return NextResponse.json({ error: 'الإيصال غير موجود' }, { status: 404 });
-    }
+      // Find accounts (prefer SDG customer liability account 2015, fallback to 2010)
+      const bankakAccount = await tx.account.findFirst({
+        where: { accountCode: '1030' },
+      });
+      const customerLiabilityAccount = await tx.account.findFirst({
+        where: { accountCode: '2015' },
+      }) || await tx.account.findFirst({
+        where: { accountCode: '2010' },
+      });
 
-    // Find accounts (prefer SDG customer liability account 2015, fallback to 2010)
-    const bankakAccount = await prisma.account.findFirst({
-      where: { accountCode: '1030' },
-    });
-    const customerLiabilityAccount = await prisma.account.findFirst({
-      where: { accountCode: '2015' },
-    }) || await prisma.account.findFirst({
-      where: { accountCode: '2010' },
-    });
+      if (!bankakAccount || !customerLiabilityAccount) {
+        throw new Error('حساب بنكك أو حساب وسيط العملاء غير مهيأ في دليل الحسابات');
+      }
 
-    if (!bankakAccount || !customerLiabilityAccount) {
-      throw new Error('حساب بنكك أو حساب وسيط العملاء غير مهيأ في دليل الحسابات');
-    }
+      const receiptAmount = Number(updatedReceipt.amount);
+
+      // Post Double-Entry Ledger Transaction INSIDE the same atomic transaction
+      await postLedgerTransaction({
+        entryType: 'bankak_receipt',
+        referenceType: 'BankakReceipt',
+        referenceId: updatedReceipt.id,
+        description: `استلام إشعار بنكك رقم ${updatedReceipt.transactionId} بمبلغ ${receiptAmount.toLocaleString()} SDG للعميل ${updatedReceipt.customer?.name || 'عام'}`,
+        createdBy: user.name,
+        tx,
+        lines: [
+          {
+            accountId: bankakAccount.id,
+            currency: 'SDG',
+            debit: receiptAmount,
+            credit: 0,
+            description: `إيداع بنكك - إشعار ${updatedReceipt.transactionId}`,
+          },
+          {
+            accountId: customerLiabilityAccount.id,
+            currency: 'SDG',
+            debit: 0,
+            credit: receiptAmount,
+            description: `استحقاق العميل ${updatedReceipt.customer?.name || ''}`,
+          },
+        ],
+      });
+
+      // Update Customer Session balance atomically if linked
+      let balanceCheckResult: any = null;
+      if (currentSession) {
+        const newReceivedTotal = Number(currentSession.receivedAmount) + receiptAmount;
+
+        balanceCheckResult = calculateSessionBalance({
+          requestedEgpAmount: Number(currentSession.requestedAmount),
+          exchangeRate: Number(currentSession.exchangeRate),
+          approvedReceiptsTotalSdg: newReceivedTotal,
+          deliveredEgpAmount: Number(currentSession.deliveredAmount),
+          overpaymentSettled: currentSession.overpaymentSettled,
+        });
+
+        await tx.customerSession.update({
+          where: { id: currentSession.id },
+          data: {
+            receivedAmount: balanceCheckResult.receivedSdgAmount,
+            remainingAmount: balanceCheckResult.remainingSdgAmount,
+            overpaymentAmount: balanceCheckResult.overpaymentAmount,
+            status: balanceCheckResult.status,
+            closedAt: balanceCheckResult.status === 'completed' ? new Date() : null,
+            closedBy: balanceCheckResult.status === 'completed' ? user.name : null,
+          },
+        });
+      }
+
+      return {
+        receipt: updatedReceipt,
+        balanceCheck: balanceCheckResult,
+        linkedSession: currentSession,
+      };
+    });
 
     const receiptAmount = Number(receipt.amount);
 
-    // 1. Post Double-Entry Ledger Transaction
-    await postLedgerTransaction({
-      entryType: 'bankak_receipt',
-      referenceType: 'BankakReceipt',
-      referenceId: receipt.id,
-      description: `استلام إشعار بنكك رقم ${receipt.transactionId} بمبلغ ${receiptAmount.toLocaleString()} SDG للعميل ${receipt.customer?.name || 'عام'}`,
-      createdBy: user.name,
-      lines: [
-        {
-          accountId: bankakAccount.id,
-          currency: 'SDG',
-          debit: receiptAmount,
-          credit: 0,
-          description: `إيداع بنكك - إشعار ${receipt.transactionId}`,
-        },
-        {
-          accountId: customerLiabilityAccount.id,
-          currency: 'SDG',
-          debit: 0,
-          credit: receiptAmount,
-          description: `استحقاق العميل ${receipt.customer?.name || ''}`,
-        },
-      ],
-    });
-
-    // 2. Update Customer Session if linked
-    if (receipt.customerSessionId && receipt.customerSession) {
-      const currentSession = receipt.customerSession;
-      const newReceivedTotal = Number(currentSession.receivedAmount) + receiptAmount;
-
-      const balanceCheck = calculateSessionBalance({
-        requestedEgpAmount: Number(currentSession.requestedAmount),
-        exchangeRate: Number(currentSession.exchangeRate),
-        approvedReceiptsTotalSdg: newReceivedTotal,
-        deliveredEgpAmount: Number(currentSession.deliveredAmount),
-        overpaymentSettled: currentSession.overpaymentSettled,
-      });
-
-      await prisma.customerSession.update({
-        where: { id: currentSession.id },
-        data: {
-          receivedAmount: balanceCheck.receivedSdgAmount,
-          remainingAmount: balanceCheck.remainingSdgAmount,
-          overpaymentAmount: balanceCheck.overpaymentAmount,
-          status: balanceCheck.status,
-          closedAt: balanceCheck.status === 'completed' ? new Date() : null,
-          closedBy: balanceCheck.status === 'completed' ? user.name : null,
-        },
-      });
-
-      // Dispatched alerts for Session Ready for Payout or Overpayment
+    // Notifications and Alerts dispatched safely after transaction commit
+    if (balanceCheck && linkedSession) {
       if (balanceCheck.isOverpaid) {
         await createNotification({
           type: 'overpayment_detected',
           title: 'تنبيه: فائض سداد للعميل (Overpayment)',
           message: `جلسة العميل ${receipt.customer?.name || ''} تحتوي على فائض بمبلغ ${balanceCheck.overpaymentAmount.toLocaleString()} SDG يتطلب تسوية أو ترحيل`,
           referenceType: 'CustomerSession',
-          referenceId: currentSession.id,
+          referenceId: linkedSession.id,
           recipientRole: 'accountant',
           priority: 'high',
         });
@@ -167,16 +175,16 @@ export async function POST(
         await createNotification({
           type: 'session_ready_for_payout',
           title: 'جلسة العميل جاهزة للصرف النقدي (Ready for Payout)',
-          message: `اكتمل استيفاء مبالغ بنكك لجلسة ${currentSession.sessionNumber} للعميل ${receipt.customer?.name || ''}. المبلغ المستحق للصرف: ${Number(currentSession.requestedAmount).toLocaleString()} EGP`,
+          message: `اكتمل استيفاء مبالغ بنكك لجلسة ${linkedSession.sessionNumber} للعميل ${receipt.customer?.name || ''}. المبلغ المستحق للصرف: ${Number(linkedSession.requestedAmount).toLocaleString()} EGP`,
           referenceType: 'CustomerSession',
-          referenceId: currentSession.id,
+          referenceId: linkedSession.id,
           recipientRole: 'custody_officer',
           priority: 'high',
         });
       }
     }
 
-    // 3. Dispatch receipt approved notification
+    // Receipt approved notification
     await createNotification({
       type: 'receipt_approved',
       title: 'تم اعتماد إيصال بنكك وتسجيل القيد المالي',
@@ -192,9 +200,9 @@ export async function POST(
       action: 'APPROVE_BANKAK_RECEIPT',
       entityType: 'BankakReceipt',
       entityId: receipt.id,
-      oldValues: { status: receipt.status },
+      oldValues: { status: 'verified' },
       newValues: { status: 'approved', amount: receipt.amount },
-      reason: `اعتماد إيصال بنكك رقم ${receipt.transactionId}`,
+      reason: `اعتماد إيصال بنكك رقم ${receipt.transactionId} وقيد اليومية المحاسبي`,
     });
 
     return NextResponse.json({

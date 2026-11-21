@@ -17,6 +17,7 @@ import {
   Calendar,
   Layers,
   X,
+  Save,
   ChevronLeft,
 } from 'lucide-react';
 
@@ -46,6 +47,7 @@ export default function ReceiptsPage() {
   const [verifySource, setVerifySource] = useState('mobile_app');
   const [verifyNotes, setVerifyNotes] = useState('');
   const [processingAction, setProcessingAction] = useState(false);
+  const [modalFeedback, setModalFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const fetchReceipts = () => {
     setLoading(true);
@@ -127,13 +129,72 @@ export default function ReceiptsPage() {
     setEditSender(rcp.senderName || '');
     setEditReceiver(rcp.receiverName || '');
     setEditDate(rcp.transactionDate || '');
+    setModalFeedback(null);
+  };
+
+  // Save Manual Edits
+  const handleSaveEdits = async () => {
+    if (!reviewReceipt) return;
+    setProcessingAction(true);
+    setModalFeedback(null);
+    try {
+      const res = await fetch(`/api/v1/receipts/${reviewReceipt.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionId: editTxnId,
+          amount: Number(editAmount),
+          senderName: editSender,
+          receiverName: editReceiver,
+          transactionDate: editDate,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'فشل تحديث بيانات الإيصال');
+      }
+      setReviewReceipt(data.data);
+      setModalFeedback({ type: 'success', message: 'تم حفظ وتوثيق تعديلات الإيصال بنجاح' });
+      fetchReceipts();
+    } catch (err: any) {
+      setModalFeedback({ type: 'error', message: err.message });
+    } finally {
+      setProcessingAction(false);
+    }
   };
 
   // Verify Receipt (Step 1)
   const handleVerify = async () => {
     if (!reviewReceipt) return;
     setProcessingAction(true);
+    setModalFeedback(null);
     try {
+      // Save changes if modified
+      const hasChanges =
+        editTxnId !== reviewReceipt.transactionId ||
+        Number(editAmount) !== Number(reviewReceipt.amount) ||
+        editSender !== (reviewReceipt.senderName || '') ||
+        editReceiver !== (reviewReceipt.receiverName || '') ||
+        editDate !== (reviewReceipt.transactionDate || '');
+
+      if (hasChanges) {
+        const patchRes = await fetch(`/api/v1/receipts/${reviewReceipt.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transactionId: editTxnId,
+            amount: Number(editAmount),
+            senderName: editSender,
+            receiverName: editReceiver,
+            transactionDate: editDate,
+          }),
+        });
+        const patchData = await patchRes.json();
+        if (!patchRes.ok || !patchData.success) {
+          throw new Error(patchData.error || 'فشل حفظ التعديلات قبل التحقق');
+        }
+      }
+
       const res = await fetch(`/api/v1/receipts/${reviewReceipt.id}/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -147,9 +208,10 @@ export default function ReceiptsPage() {
         throw new Error(data.error || 'فشل التحقق من الإيصال');
       }
       setReviewReceipt(data.data);
+      setModalFeedback({ type: 'success', message: 'تم تأكيد التحقق البنكي بنجاح، الإيصال جاهز للاعتماد' });
       fetchReceipts();
     } catch (err: any) {
-      alert(err.message);
+      setModalFeedback({ type: 'error', message: err.message });
     } finally {
       setProcessingAction(false);
     }
@@ -159,7 +221,34 @@ export default function ReceiptsPage() {
   const handleApprove = async () => {
     if (!reviewReceipt) return;
     setProcessingAction(true);
+    setModalFeedback(null);
     try {
+      // Save changes if modified
+      const hasChanges =
+        editTxnId !== reviewReceipt.transactionId ||
+        Number(editAmount) !== Number(reviewReceipt.amount) ||
+        editSender !== (reviewReceipt.senderName || '') ||
+        editReceiver !== (reviewReceipt.receiverName || '') ||
+        editDate !== (reviewReceipt.transactionDate || '');
+
+      if (hasChanges) {
+        const patchRes = await fetch(`/api/v1/receipts/${reviewReceipt.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transactionId: editTxnId,
+            amount: Number(editAmount),
+            senderName: editSender,
+            receiverName: editReceiver,
+            transactionDate: editDate,
+          }),
+        });
+        const patchData = await patchRes.json();
+        if (!patchRes.ok || !patchData.success) {
+          throw new Error(patchData.error || 'فشل حفظ التعديلات قبل الاعتماد');
+        }
+      }
+
       const res = await fetch(`/api/v1/receipts/${reviewReceipt.id}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -174,7 +263,7 @@ export default function ReceiptsPage() {
       setReviewReceipt(null);
       fetchReceipts();
     } catch (err: any) {
-      alert(err.message);
+      setModalFeedback({ type: 'error', message: err.message });
     } finally {
       setProcessingAction(false);
     }
@@ -187,6 +276,7 @@ export default function ReceiptsPage() {
     if (!reason || !reason.trim()) return;
 
     setProcessingAction(true);
+    setModalFeedback(null);
     try {
       const res = await fetch(`/api/v1/receipts/${reviewReceipt.id}/reject`, {
         method: 'POST',
@@ -200,7 +290,7 @@ export default function ReceiptsPage() {
       setReviewReceipt(null);
       fetchReceipts();
     } catch (err: any) {
-      alert(err.message);
+      setModalFeedback({ type: 'error', message: err.message });
     } finally {
       setProcessingAction(false);
     }
@@ -238,6 +328,7 @@ export default function ReceiptsPage() {
         );
       case 'pending_verification':
       case 'pending_review':
+      case 'uploaded':
         return (
           <span className="inline-flex items-center space-x-1 space-x-reverse px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
             <span>بانتظار التحقق</span>
@@ -310,7 +401,8 @@ export default function ReceiptsPage() {
           <div className="flex items-center space-x-1.5 space-x-reverse overflow-x-auto touch-scroll pb-1 md:pb-0">
             {[
               { id: '', label: 'الكل' },
-              { id: 'pending_review', label: 'بانتظار المراجعة' },
+              { id: 'pending_verification', label: 'بانتظار التحقق' },
+              { id: 'verified', label: 'تم التحقق بنكياً' },
               { id: 'approved', label: 'معتمدة' },
               { id: 'duplicate', label: 'مكررة' },
               { id: 'rejected', label: 'مرفوضة' },
@@ -358,7 +450,7 @@ export default function ReceiptsPage() {
                   <div className="text-left">
                     <span className="text-[10px] text-slate-400 block">المبلغ:</span>
                     <span className="font-mono font-black text-base text-slate-900">
-                      {rcp.amount.toLocaleString()} <span className="text-xs text-slate-400 font-normal">SDG</span>
+                      {Number(rcp.amount).toLocaleString()} <span className="text-xs text-slate-400 font-normal">SDG</span>
                     </span>
                   </div>
                 </div>
@@ -408,6 +500,7 @@ export default function ReceiptsPage() {
                   <th className="p-3.5">رقم العملية (Bankak TXN)</th>
                   <th className="p-3.5">المبلغ (SDG)</th>
                   <th className="p-3.5">المرسل</th>
+                  <th className="p-3.5">المستفيد</th>
                   <th className="p-3.5">العميل المرتبط</th>
                   <th className="p-3.5">التاريخ والوقت</th>
                   <th className="p-3.5">دقة OCR</th>
@@ -418,7 +511,7 @@ export default function ReceiptsPage() {
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {receipts.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="text-center py-12 text-slate-400">
+                    <td colSpan={10} className="text-center py-12 text-slate-400">
                       {loading ? 'جاري تحميل الإيصالات...' : 'لا توجد إيصالات تطابق البحث'}
                     </td>
                   </tr>
@@ -428,9 +521,10 @@ export default function ReceiptsPage() {
                       <td className="p-3.5 font-mono font-medium text-slate-900">{rcp.receiptNumber}</td>
                       <td className="p-3.5 font-mono font-bold text-blue-700">{rcp.transactionId}</td>
                       <td className="p-3.5 font-mono font-black text-slate-900 text-sm">
-                        {rcp.amount.toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">SDG</span>
+                        {Number(rcp.amount).toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">SDG</span>
                       </td>
                       <td className="p-3.5">{rcp.senderName || '—'}</td>
+                      <td className="p-3.5">{rcp.receiverName || 'مكتب الصرافة'}</td>
                       <td className="p-3.5 font-medium">{rcp.customer?.name || 'غير محدد'}</td>
                       <td className="p-3.5 font-mono text-[11px] text-slate-500">
                         {rcp.transactionDate} {rcp.transactionTime}
@@ -532,7 +626,7 @@ export default function ReceiptsPage() {
                       type="button"
                       onClick={() => {
                         setBatchReceiptsText(
-                          `Bank of Khartoum\nTransaction ID: 123456789\nAmount: 5,000,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 10:15:00\n---\nBank of Khartoum\nTransaction ID: 987654321\nAmount: 3,000,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 10:25:00\n---\nBank of Khartoum\nTransaction ID: 554433221\nAmount: 7,000,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 10:40:00\n---\nBank of Khartoum\nTransaction ID: 998877665\nAmount: 5,000,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 11:00:00`
+                          `Bank of Khartoum\nTransaction ID: 123456789\nAmount: 5,000,000 SDG\nSender: عمر أحمد\nReceiver: مكتب الصرافة\nDate: 21/11/2026\nTime: 10:15:00\n---\nBank of Khartoum\nTransaction ID: 987654321\nAmount: 3,000,000 SDG\nSender: عمر أحمد\nReceiver: مكتب الصرافة\nDate: 21/11/2026\nTime: 10:25:00\n---\nBank of Khartoum\nTransaction ID: 554433221\nAmount: 7,000,000 SDG\nSender: عمر أحمد\nReceiver: مكتب الصرافة\nDate: 21/11/2026\nTime: 10:40:00\n---\nBank of Khartoum\nTransaction ID: 998877665\nAmount: 5,000,000 SDG\nSender: عمر أحمد\nReceiver: مكتب الصرافة\nDate: 21/11/2026\nTime: 11:00:00`
                         );
                       }}
                       className="text-[11px] text-blue-600 font-bold hover:underline self-start sm:self-auto"
@@ -590,6 +684,22 @@ export default function ReceiptsPage() {
                 </button>
               </div>
 
+              {/* Feedback Alert Banner */}
+              {modalFeedback && (
+                <div className={`mb-4 p-3.5 rounded-2xl flex items-center space-x-2 space-x-reverse text-xs sm:text-sm font-bold ${
+                  modalFeedback.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                    : 'bg-rose-50 text-rose-900 border border-rose-200'
+                }`}>
+                  {modalFeedback.type === 'success' ? (
+                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span>{modalFeedback.message}</span>
+                </div>
+              )}
+
               {/* Duplicate Alert if duplicate */}
               {reviewReceipt.status === 'duplicate' && (
                 <div className="mb-4 p-3.5 bg-rose-50 border border-rose-300 rounded-2xl flex items-center space-x-3 space-x-reverse text-rose-900">
@@ -598,6 +708,19 @@ export default function ReceiptsPage() {
                     <h4 className="font-black text-xs sm:text-sm">تحذير حاسم: هذا الإيصال مسجل مسبقاً في النظام!</h4>
                     <p className="text-[11px] sm:text-xs text-rose-700 mt-0.5">
                       تم اكتشاف رقم العملية ({reviewReceipt.transactionId}) مسبقاً، وتم منعه لحماية الدفاتر المحاسبية.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Suspicious Alert if suspicious */}
+              {reviewReceipt.status === 'suspicious' && (
+                <div className="mb-4 p-3.5 bg-amber-50 border border-amber-300 rounded-2xl flex items-center space-x-3 space-x-reverse text-amber-900">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <h4 className="font-black text-xs sm:text-sm">تنبيه: اشتباه في تطابق الإيصال مع معاملة سابقة</h4>
+                    <p className="text-[11px] sm:text-xs text-amber-700 mt-0.5">
+                      {reviewReceipt.suspicionReason || 'يرجى مراجعة تفاصيل الحساب البنكي والتحقق من صحة التحويل قبل الاعتماد.'}
                     </p>
                   </div>
                 </div>
@@ -653,17 +776,25 @@ export default function ReceiptsPage() {
 
                 {/* Editable Fields */}
                 <div className="space-y-3.5">
-                  <h4 className="font-bold text-xs sm:text-sm text-slate-900">
-                    بيانات الإيصال المستخرجة (قابلة للمراجعة والتصحيح)
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-xs sm:text-sm text-slate-900">
+                      بيانات الإيصال المستخرجة (قابلة للمراجعة والتصحيح)
+                    </h4>
+                    {reviewReceipt.reviewedBy && (
+                      <span className="text-[10px] text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded">
+                        آخر تعديل: {reviewReceipt.reviewedBy}
+                      </span>
+                    )}
+                  </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">رقم العملية (Transaction ID)</label>
                     <input
                       type="text"
+                      disabled={reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
                       value={editTxnId}
                       onChange={(e) => setEditTxnId(e.target.value)}
-                      className="w-full px-3.5 py-2.5 font-mono text-sm font-bold rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                      className="w-full px-3.5 py-2.5 font-mono text-sm font-bold rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px] disabled:bg-slate-100"
                     />
                   </div>
 
@@ -672,20 +803,34 @@ export default function ReceiptsPage() {
                     <input
                       type="number"
                       inputMode="decimal"
+                      disabled={reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
                       value={editAmount}
                       onChange={(e) => setEditAmount(e.target.value)}
-                      className="w-full px-3.5 py-2.5 font-mono text-sm font-black rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                      className="w-full px-3.5 py-2.5 font-mono text-sm font-black rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px] disabled:bg-slate-100"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">اسم المرسل</label>
-                    <input
-                      type="text"
-                      value={editSender}
-                      onChange={(e) => setEditSender(e.target.value)}
-                      className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">اسم المرسل</label>
+                      <input
+                        type="text"
+                        disabled={reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
+                        value={editSender}
+                        onChange={(e) => setEditSender(e.target.value)}
+                        className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px] disabled:bg-slate-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">المستفيد</label>
+                      <input
+                        type="text"
+                        disabled={reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
+                        value={editReceiver}
+                        onChange={(e) => setEditReceiver(e.target.value)}
+                        className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px] disabled:bg-slate-100"
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -693,9 +838,10 @@ export default function ReceiptsPage() {
                       <label className="block text-xs font-bold text-slate-700 mb-1">التاريخ</label>
                       <input
                         type="date"
+                        disabled={reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
                         value={editDate}
                         onChange={(e) => setEditDate(e.target.value)}
-                        className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                        className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px] disabled:bg-slate-100"
                       />
                     </div>
                     <div>
@@ -705,6 +851,19 @@ export default function ReceiptsPage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Save Edits Action Button */}
+                  {reviewReceipt.status !== 'approved' && reviewReceipt.status !== 'rejected' && (
+                    <button
+                      type="button"
+                      onClick={handleSaveEdits}
+                      disabled={processingAction}
+                      className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl text-xs flex items-center justify-center space-x-1 space-x-reverse min-h-[40px] transition-colors"
+                    >
+                      <Save className="w-4 h-4 text-slate-600" />
+                      <span>حفظ التعديلات المدخلة</span>
+                    </button>
+                  )}
 
                   {/* Verification Section */}
                   <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
@@ -728,7 +887,7 @@ export default function ReceiptsPage() {
                           <select
                             value={verifySource}
                             onChange={(e) => setVerifySource(e.target.value)}
-                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300"
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 min-h-[38px]"
                           >
                             <option value="mobile_app">تطبيق بنكك (الهاتف)</option>
                             <option value="bank_statement">كشف حساب بنك الخرطوم</option>
@@ -742,7 +901,7 @@ export default function ReceiptsPage() {
                             value={verifyNotes}
                             onChange={(e) => setVerifyNotes(e.target.value)}
                             placeholder="مثال: مطابقة الرصيد اللحظي"
-                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300"
+                            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 min-h-[38px]"
                           />
                         </div>
                       </div>
