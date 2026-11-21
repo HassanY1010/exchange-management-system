@@ -222,8 +222,18 @@ async function runReceiptsAuditTests() {
   const inFlightTxn = `TXN-INFLIGHT-${Date.now()}`;
   const batchPayload = {
     items: [
-      { transactionId: inFlightTxn, amount: 500000, customerId: testCustomer.id },
-      { transactionId: inFlightTxn, amount: 500000, customerId: testCustomer.id }, // Same in batch
+      {
+        transactionId: inFlightTxn,
+        amount: 500000,
+        customerId: testCustomer.id,
+        rawOcrText: `Bank of Khartoum\nTransaction ID: ${inFlightTxn}\nAmount: 500,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 10:15:00`,
+      },
+      {
+        transactionId: inFlightTxn,
+        amount: 500000,
+        customerId: testCustomer.id,
+        rawOcrText: `Bank of Khartoum\nTransaction ID: ${inFlightTxn}\nAmount: 500,000 SDG\nSender: عمر أحمد\nDate: 21/11/2026\nTime: 10:15:00`,
+      }, // Same in batch
     ],
   };
   const resBatch = await callUpload(batchPayload, tokenDataEntry);

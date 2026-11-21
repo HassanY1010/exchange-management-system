@@ -139,50 +139,128 @@ export async function POST(req: NextRequest) {
         existingReceipts
       );
 
-      const status = riskAssessment.status;
-      const isDuplicate = riskAssessment.isDuplicate;
-      const isSuspicious = riskAssessment.isSuspicious;
-      const duplicateOfId = riskAssessment.matchedReceiptId || null;
-      const suspicionReason = riskAssessment.reason || null;
+      let status: string = riskAssessment.status;
+      // Low OCR confidence or missing critical fields mandates manual review status
+      if (status === 'pending_verification' && (parsed.ocrConfidence < 70 || amount <= 0 || !transactionId || parsed.extractedFieldsCount < 2)) {
+        status = 'pending_review';
+      }
+
+      let isDuplicate = riskAssessment.isDuplicate;
+      let isSuspicious = riskAssessment.isSuspicious;
+      let duplicateOfId = riskAssessment.matchedReceiptId || null;
+      let suspicionReason = riskAssessment.reason || null;
 
       const receiptNumber = `RCP-${Date.now()}-${i + 1}`;
 
       // Upload to Storage if configured
       let imageStorageKey = 'no-image';
       if (imageData) {
-        const uploadResult = await uploadReceiptImage(imageData, `rcp-${Date.now()}-${transactionId}.png`);
+        const uploadResult = await uploadReceiptImage(imageData, `rcp-${Date.now()}-${transactionId || 'notxn'}.png`);
         imageStorageKey = uploadResult.publicUrl || uploadResult.storageKey;
       }
 
-      const receipt = await prisma.bankakReceipt.create({
-        data: {
-          receiptNumber,
-          transactionId,
-          customerId: customerId || null,
-          customerSessionId: customerSessionId || null,
-          senderName,
-          senderAccount,
-          receiverName,
-          receiverAccount,
-          amount,
-          currency: 'SDG',
-          transactionDate,
-          transactionTime,
-          bankName: 'بنكك - بنك الخرطوم',
-          ocrText: rawOcrText || parsed.rawText,
-          ocrConfidence: parsed.ocrConfidence,
-          imageStorageKey,
-          imageHash,
-          status,
-          duplicateOfId,
-          isSuspicious,
-          suspicionReason,
-          createdBy: user.name,
-        },
-        include: {
-          customer: true,
-          customerSession: true,
-        },
+      // Concurrency-safe DB insert with advisory lock & unique constraint protection
+      const receipt = await prisma.$transaction(async (tx) => {
+        if (transactionId) {
+          // Acquire transaction-scoped advisory lock on transactionId
+          await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', transactionId);
+
+          // Check if concurrent request already inserted this transactionId as active
+          const concurrentMatch = await tx.bankakReceipt.findFirst({
+            where: {
+              transactionId,
+              status: { notIn: ['duplicate', 'rejected'] },
+            },
+            select: { id: true, receiptNumber: true },
+          });
+
+          if (concurrentMatch) {
+            status = 'duplicate';
+            isDuplicate = true;
+            duplicateOfId = concurrentMatch.id;
+            suspicionReason = `تطابق قطعي بالتزامن: رقم العملية (${transactionId}) مسجل مسبقاً بالإيصال ${concurrentMatch.receiptNumber}`;
+          }
+        }
+
+        try {
+          return await tx.bankakReceipt.create({
+            data: {
+              receiptNumber,
+              transactionId,
+              customerId: customerId || null,
+              customerSessionId: customerSessionId || null,
+              senderName,
+              senderAccount,
+              receiverName,
+              receiverAccount,
+              amount,
+              currency: 'SDG',
+              transactionDate,
+              transactionTime,
+              bankName: 'بنكك - بنك الخرطوم',
+              ocrText: rawOcrText || parsed.rawText,
+              ocrConfidence: parsed.ocrConfidence,
+              imageStorageKey,
+              imageHash,
+              status,
+              duplicateOfId,
+              isSuspicious,
+              suspicionReason,
+              createdBy: user.name,
+            },
+            include: {
+              customer: true,
+              customerSession: true,
+            },
+          });
+        } catch (dbErr: any) {
+          // Graceful handling of Unique Constraint error (P2002 or Postgres 23505) without crash
+          if (
+            dbErr.code === 'P2002' ||
+            dbErr.message?.includes('idx_bankak_receipt_active_txn') ||
+            dbErr.message?.includes('unique constraint')
+          ) {
+            const conflict = await tx.bankakReceipt.findFirst({
+              where: { transactionId, status: { notIn: ['duplicate', 'rejected'] } },
+            });
+            status = 'duplicate';
+            isDuplicate = true;
+            duplicateOfId = conflict?.id || null;
+            suspicionReason = `تطابق قطعي على مستوى قاعدة البيانات: قيد الفرادة منع تكرار رقم العملية (${transactionId})`;
+
+            return await tx.bankakReceipt.create({
+              data: {
+                receiptNumber,
+                transactionId,
+                customerId: customerId || null,
+                customerSessionId: customerSessionId || null,
+                senderName,
+                senderAccount,
+                receiverName,
+                receiverAccount,
+                amount,
+                currency: 'SDG',
+                transactionDate,
+                transactionTime,
+                bankName: 'بنكك - بنك الخرطوم',
+                ocrText: rawOcrText || parsed.rawText,
+                ocrConfidence: parsed.ocrConfidence,
+                imageStorageKey,
+                imageHash,
+                status: 'duplicate',
+                duplicateOfId,
+                isSuspicious: false,
+                suspicionReason,
+                createdBy: user.name,
+              },
+              include: {
+                customer: true,
+                customerSession: true,
+              },
+            });
+          }
+          throw dbErr;
+        }
       });
 
       // Append newly created receipt to in-memory existing list for in-flight duplicate checks

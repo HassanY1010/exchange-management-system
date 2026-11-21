@@ -125,7 +125,12 @@ export async function POST(
       // Update Customer Session balance atomically if linked
       let balanceCheckResult: any = null;
       if (currentSession) {
-        const newReceivedTotal = Number(currentSession.receivedAmount) + receiptAmount;
+        // Query the true mathematical sum of all approved receipts inside tx to eliminate any race condition
+        const sumResult = await tx.$queryRawUnsafe<any[]>(
+          'SELECT COALESCE(SUM("amount"), 0) as total FROM "BankakReceipt" WHERE "customerSessionId" = $1 AND "status" = \'approved\'',
+          currentSession.id
+        );
+        const newReceivedTotal = Number(sumResult[0]?.total || 0);
 
         balanceCheckResult = calculateSessionBalance({
           requestedEgpAmount: Number(currentSession.requestedAmount),
