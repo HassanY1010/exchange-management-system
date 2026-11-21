@@ -9,6 +9,7 @@ async function main() {
   // Clean wipe of transactional data to ensure 100% ledger-account balance synchronization
   await prisma.ledgerLine.deleteMany();
   await prisma.ledgerEntry.deleteMany();
+  await prisma.cashPayoutVoucher.deleteMany();
   await prisma.bankakReceipt.deleteMany();
   await prisma.exchangeTransaction.deleteMany();
   await prisma.custodyTransaction.deleteMany();

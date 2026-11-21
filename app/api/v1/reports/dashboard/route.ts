@@ -219,15 +219,53 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Role-based permissions matrix for Dashboard UI
+  // Role-based permissions matrix for Dashboard UI & Data Access
+  const isFinanceRole = ['admin', 'accountant'].includes(user.role);
+  const isCustodyOfficer = user.role === 'custody_officer';
+  const isBankakAuditor = user.role === 'bankak_auditor';
+  const isDataEntry = user.role === 'data_entry';
+
   const permissions = {
     canDeliver: ['admin', 'custody_officer'].includes(user.role),
-    canCloseDay: ['admin', 'accountant'].includes(user.role),
-    canManageSuppliers: ['admin', 'accountant'].includes(user.role),
+    canCloseDay: isFinanceRole,
+    canManageSuppliers: isFinanceRole,
     canUploadReceipts: ['admin', 'data_entry', 'accountant'].includes(user.role),
     canOpenSession: ['admin', 'data_entry', 'accountant'].includes(user.role),
     canAuditBankak: ['admin', 'bankak_auditor', 'accountant'].includes(user.role),
     canViewLedger,
+    canViewCapital: isFinanceRole,
+    canViewAllBalances: isFinanceRole,
+  };
+
+  // Build role-protected KPI payload (strict zero-leakage on API level)
+  const roleKpi: any = {
+    // Operations & receipts stats accessible according to operational role
+    totalCustomersToday: isFinanceRole || isCustodyOfficer || isDataEntry ? totalCustomersToday : 0,
+    totalReceiptsCount: isFinanceRole || isBankakAuditor || isDataEntry ? totalReceiptsCount : 0,
+    pendingReceiptsCount: isFinanceRole || isBankakAuditor || isDataEntry ? pendingReceiptsCount : 0,
+    pendingVerificationCount: isFinanceRole || isBankakAuditor ? pendingVerificationCount : 0,
+    verifiedAwaitingApprovalCount: isFinanceRole || isBankakAuditor ? verifiedAwaitingApprovalCount : 0,
+    duplicateReceiptsCount: isFinanceRole || isBankakAuditor || isDataEntry ? duplicateReceiptsCount : 0,
+    suspiciousReceiptsCount: isFinanceRole || isBankakAuditor ? suspiciousReceiptsCount : 0,
+    approvedReceiptsCount: isFinanceRole || isBankakAuditor || isDataEntry ? approvedReceiptsCount : 0,
+    rejectedReceiptsCount: isFinanceRole || isBankakAuditor ? rejectedReceiptsCount : 0,
+    totalReceivedSdgToday: isFinanceRole || isBankakAuditor ? totalReceivedSdgToday : 0,
+    totalDeliveredEgpToday: isFinanceRole || isCustodyOfficer ? totalDeliveredEgpToday : 0,
+
+    // Financial balances: Strictly restricted based on duty separation
+    totalEgp: isFinanceRole ? totalEgp : isCustodyOfficer ? mainEgpSafe + custodyBalance : 0,
+    totalSdg: isFinanceRole ? totalSdg : 0,
+    mainEgpSafe: isFinanceRole || isCustodyOfficer ? mainEgpSafe : 0,
+    mainSdgSafe: isFinanceRole ? mainSdgSafe : 0,
+    bankakBalance: isFinanceRole || isBankakAuditor ? bankakBalance : 0,
+    bankBalance: isFinanceRole ? bankBalance : 0,
+    custodyBalance: isFinanceRole || isCustodyOfficer ? custodyBalance : 0,
+
+    // Confidential Company Equity & Debts: Admin & Accountant ONLY
+    capitalBalance: isFinanceRole ? capitalBalance : 0,
+    totalExpensesToday: isFinanceRole ? totalExpensesToday : 0,
+    totalCustomerDebts: isFinanceRole ? totalCustomerDebts : 0,
+    totalSupplierDebts: isFinanceRole ? totalSupplierDebts : 0,
   };
 
   return NextResponse.json({
@@ -238,30 +276,7 @@ export async function GET(req: NextRequest) {
       permissions,
       businessDate: todayStr,
       timeZone,
-      kpi: {
-        totalEgp,
-        totalSdg,
-        mainEgpSafe,
-        mainSdgSafe,
-        bankakBalance,
-        bankBalance,
-        custodyBalance,
-        capitalBalance,
-        totalExpensesToday,
-        totalCustomerDebts,
-        totalSupplierDebts,
-        totalCustomersToday,
-        totalReceivedSdgToday,
-        totalDeliveredEgpToday,
-        totalReceiptsCount,
-        pendingReceiptsCount,
-        pendingVerificationCount,
-        verifiedAwaitingApprovalCount,
-        duplicateReceiptsCount,
-        suspiciousReceiptsCount,
-        approvedReceiptsCount,
-        rejectedReceiptsCount,
-      },
+      kpi: roleKpi,
       recentLedger,
       alerts,
     },

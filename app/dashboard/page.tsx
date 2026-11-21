@@ -192,21 +192,48 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Invested Capital */}
-          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden">
-            <div className="flex items-center justify-between mb-2 sm:mb-3">
-              <span className="text-xs font-bold text-slate-500">رأس المال المستثمر</span>
-              <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                <TrendingUp className="w-4 h-4" />
+          {/* Invested Capital / Role-Specific Primary Metric */}
+          {permissions?.canViewCapital ? (
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between mb-2 sm:mb-3">
+                <span className="text-xs font-bold text-slate-500">رأس المال المستثمر</span>
+                <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                  <TrendingUp className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-slate-900 mb-1 truncate">
+                {(kpi.capitalBalance || 0).toLocaleString()} <span className="text-xs font-medium text-slate-400">EGP</span>
+              </div>
+              <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
+                <span>حقوق الملكية للمؤسسة (رأس المال المودع)</span>
               </div>
             </div>
-            <div className="text-xl sm:text-2xl font-black text-slate-900 mb-1 truncate">
-              {(kpi.capitalBalance || 0).toLocaleString()} <span className="text-xs font-medium text-slate-400">EGP</span>
+          ) : (
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between mb-2 sm:mb-3">
+                <span className="text-xs font-bold text-slate-500">
+                  {userRole === 'custody_officer'
+                    ? 'مصري مسلّم اليوم'
+                    : userRole === 'bankak_auditor'
+                    ? 'إيصالات بانتظار المراجعة'
+                    : 'إجمالي الإيصالات'}
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-xl sm:text-2xl font-black text-slate-900 mb-1 truncate">
+                {userRole === 'custody_officer'
+                  ? `${(kpi.totalDeliveredEgpToday || 0).toLocaleString()} EGP`
+                  : userRole === 'bankak_auditor'
+                  ? `${kpi.pendingReceiptsCount || 0} إيصال`
+                  : `${kpi.totalReceiptsCount || 0} إيصال`}
+              </div>
+              <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
+                <span>مؤشر العمليات المعتمد للدور</span>
+              </div>
             </div>
-            <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
-              <span>حقوق الملكية للمؤسسة (رأس المال)</span>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Operational Flow Stats */}

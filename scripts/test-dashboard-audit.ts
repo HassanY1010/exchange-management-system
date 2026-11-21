@@ -107,6 +107,7 @@ async function runDashboardAuditTests() {
   // B. Custody Officer
   const resCustody = await callDashboardApi(tokenCustody);
   const custPerms = resCustody.data.data.permissions;
+  const custKpi = resCustody.data.data.kpi;
   assert(
     custPerms.canDeliver === true,
     'مسؤول العهدة: تمكين مسؤول العهدة من عمليات صرف النقدية (canDeliver = true)',
@@ -120,10 +121,15 @@ async function runDashboardAuditTests() {
     resCustody.data.data.recentLedger.length === 0,
     'حماية سرية البيانات: حجب سجل القيود المحاسبية المركزية تماماً عن مسؤول العهدة (zero leakage)'
   );
+  assert(
+    custKpi.capitalBalance === 0 && custKpi.totalCustomerDebts === 0 && custKpi.totalSupplierDebts === 0,
+    'حماية سرية البيانات على مستوى API: حجب رأس المال وديون المؤسسة عن مسؤول العهدة'
+  );
 
   // C. Data Entry
   const resDataEntry = await callDashboardApi(tokenDataEntry);
   const dataPerms = resDataEntry.data.data.permissions;
+  const dataKpi = resDataEntry.data.data.kpi;
   assert(
     dataPerms.canUploadReceipts === true && dataPerms.canOpenSession === true && dataPerms.canDeliver === false && dataPerms.canCloseDay === false,
     'مدخل البيانات: تمكين رفع الإيصالات وفتح الجلسات وحظر الصرف والإغلاق'
@@ -132,13 +138,22 @@ async function runDashboardAuditTests() {
     resDataEntry.data.data.recentLedger.length === 0,
     'حماية سرية البيانات: حجب سجل القيود المحاسبية المركزية تماماً عن مدخل البيانات'
   );
+  assert(
+    dataKpi.capitalBalance === 0 && dataKpi.totalEgp === 0 && dataKpi.totalSdg === 0 && dataKpi.mainEgpSafe === 0,
+    'حماية سرية البيانات على مستوى API: حجب كافة الأرصدة النقدية ورأس المال عن مدخل البيانات'
+  );
 
   // D. Bankak Auditor
   const resAuditor = await callDashboardApi(tokenAuditor);
   const auditPerms = resAuditor.data.data.permissions;
+  const auditKpi = resAuditor.data.data.kpi;
   assert(
     auditPerms.canAuditBankak === true && auditPerms.canDeliver === false && auditPerms.canCloseDay === false,
     'مدقق بنكك: تمكين التدقيق والمطابقة وحظر الصرف والإغلاق'
+  );
+  assert(
+    auditKpi.bankakBalance > 0 && auditKpi.capitalBalance === 0 && auditKpi.totalEgp === 0 && auditKpi.mainEgpSafe === 0,
+    'حماية سرية البيانات على مستوى API: تمكين رصيد بنكك فقط وحجب رأس المال والخزينة المصرية عن مراجع بنكك'
   );
 
   // 4. Double-Entry Breakdown in Recent Ledger
