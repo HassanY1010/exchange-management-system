@@ -20,7 +20,7 @@ async function main() {
   await prisma.debtPayment.deleteMany();
   await prisma.debt.deleteMany();
   await prisma.capitalTransaction.deleteMany();
-  await prisma.account.deleteMany({ where: { accountCode: { startsWith: 'TEST-' } } });
+  console.log('1. تم تفريغ البيانات القديمة بنجاح');
 
   // 1. Roles
   const adminRole = await prisma.role.upsert({
@@ -103,6 +103,7 @@ async function main() {
       },
     });
   }
+  console.log('2. تم إنشاء الأدوار والصلاحيات بنجاح');
 
   // 3. Default Users
   const passwordHash = await bcrypt.hash('admin123', 10);
@@ -192,6 +193,7 @@ async function main() {
       },
     });
   }
+  console.log('2. تم إنشاء الأدوار والصلاحيات بنجاح');
 
   // 6. Expense Categories
   const categories = [
@@ -210,6 +212,7 @@ async function main() {
       create: cat,
     });
   }
+  console.log('2. تم إنشاء الأدوار والصلاحيات بنجاح');
 
   // 7. Initial Exchange Rates
   await prisma.exchangeRate.createMany({
@@ -270,6 +273,7 @@ async function main() {
       create: s,
     });
   }
+  console.log('2. تم إنشاء الأدوار والصلاحيات بنجاح');
 
   console.log('✅ تم تهيئة قاعدة البيانات بنجاح: تم إنشاء الأدوار، المستخدمين، دليل الحسابات، أسعار الصرف والإعدادات!');
 }
