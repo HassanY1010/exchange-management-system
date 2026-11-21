@@ -66,7 +66,38 @@ export async function POST(
     const exchangeRate = Number(session.exchangeRate);
     const equivalentSdg = new Decimal(amountEgp).times(exchangeRate).toNumber();
 
-    // 1. Post double-entry accounting transaction
+    // 1. Post double-entry accounting transactions for multi-currency settlement
+    // Leg A: Clear customer SDG liability against FX clearing if 2015/1065 exist
+    const customerLiabilitySdg = await prisma.account.findFirst({ where: { accountCode: '2015' } });
+    const currencyClearingSdg = await prisma.account.findFirst({ where: { accountCode: '1065' } });
+
+    if (customerLiabilitySdg && currencyClearingSdg) {
+      await postLedgerTransaction({
+        entryType: 'currency_exchange_sdg_clear',
+        referenceType: 'CustomerSession',
+        referenceId: session.id,
+        description: `تسوية التزام العميل بالسوداني ${equivalentSdg.toLocaleString()} SDG لجلسة ${session.sessionNumber}`,
+        createdBy: user.name,
+        lines: [
+          {
+            accountId: customerLiabilitySdg.id,
+            currency: 'SDG',
+            debit: equivalentSdg,
+            credit: 0,
+            description: `تسوية التزام العميل ${session.customer.name}`,
+          },
+          {
+            accountId: currencyClearingSdg.id,
+            currency: 'SDG',
+            debit: 0,
+            credit: equivalentSdg,
+            description: `إقفال في وسيط تسوية العملات`,
+          },
+        ],
+      });
+    }
+
+    // Leg B: Deliver cash in EGP from safe and debit customer liability / clearing
     await postLedgerTransaction({
       entryType: 'customer_cash_delivery',
       referenceType: 'CustomerSession',

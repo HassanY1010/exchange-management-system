@@ -10,6 +10,10 @@ export async function POST(
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  if (!['admin', 'accountant'].includes(user.role)) {
+    return NextResponse.json({ error: 'صلاحية رفض الإيصالات المالية مقتصرة على المحاسب أو مدير النظام فقط' }, { status: 403 });
+  }
+
   try {
     const { reason } = await req.json();
 

@@ -27,6 +27,10 @@ export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  if (user.role !== 'admin') {
+    return NextResponse.json({ error: 'صلاحية تعديل وسحب أو ضخ رأس المال مخصصة لمدير النظام فقط' }, { status: 403 });
+  }
+
   try {
     const { transactionType, accountId, currency, amount, description } = await req.json();
 

@@ -19,6 +19,10 @@ export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  if (!['admin', 'accountant'].includes(user.role)) {
+    return NextResponse.json({ error: 'صلاحية إغلاق اليوم المالي وتجميده مقتصرة على المحاسب أو مدير النظام فقط' }, { status: 403 });
+  }
+
   try {
     const { businessDate, countedBalances, notes } = await req.json();
 

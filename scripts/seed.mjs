@@ -6,6 +6,22 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('--- بدء تهيئة قاعدة البيانات والبيانات الأساسية للنظام ---');
 
+  // Clean wipe of transactional data to ensure 100% ledger-account balance synchronization
+  await prisma.ledgerLine.deleteMany();
+  await prisma.ledgerEntry.deleteMany();
+  await prisma.bankakReceipt.deleteMany();
+  await prisma.exchangeTransaction.deleteMany();
+  await prisma.custodyTransaction.deleteMany();
+  await prisma.employeeCustody.deleteMany();
+  await prisma.customerSession.deleteMany();
+  await prisma.dailyClosing.deleteMany();
+  await prisma.supplierTransaction.deleteMany();
+  await prisma.expense.deleteMany();
+  await prisma.debtPayment.deleteMany();
+  await prisma.debt.deleteMany();
+  await prisma.capitalTransaction.deleteMany();
+  await prisma.account.deleteMany({ where: { accountCode: { startsWith: 'TEST-' } } });
+
   // 1. Roles
   const adminRole = await prisma.role.upsert({
     where: { name: 'admin' },
@@ -151,7 +167,10 @@ async function main() {
     { code: '1030', name: 'حساب بنكك الرئيسي (Bankak Account - BOK)', type: 'bankak', currency: 'SDG', balance: 10000000 },
     { code: '1040', name: 'الحساب البنكي التجاري المصري (EGP Bank Account)', type: 'bank', currency: 'EGP', balance: 500000 },
     { code: '1050', name: 'عهدة الموظف محمد (Custody Mohammed)', type: 'employee_custody', currency: 'EGP', balance: 500000 },
-    { code: '2010', name: 'التزامات وحسابات العملاء المفتوحة (Customer Liabilities)', type: 'customer_liability', currency: 'EGP', balance: 0 },
+    { code: '1060', name: 'حساب وسيط تسوية وتبادل العملات - مصري (Currency Clearing EGP)', type: 'cash_safe', currency: 'EGP', balance: 0 },
+    { code: '1065', name: 'حساب وسيط تسوية وتبادل العملات - سوداني (Currency Clearing SDG)', type: 'cash_safe', currency: 'SDG', balance: 0 },
+    { code: '2010', name: 'التزامات وحسابات العملاء المفتوحة - مصري (Customer Liabilities EGP)', type: 'customer_liability', currency: 'EGP', balance: 0 },
+    { code: '2015', name: 'التزامات وحسابات العملاء المفتوحة - سوداني (Customer Liabilities SDG)', type: 'customer_liability', currency: 'SDG', balance: 0 },
     { code: '2020', name: 'التزامات وحسابات الموردين (Supplier Liabilities)', type: 'supplier_liability', currency: 'SDG', balance: 0 },
     { code: '3010', name: 'رأس المال المستثمر (Invested Capital)', type: 'capital', currency: 'EGP', balance: 2000000 },
     { code: '4010', name: 'أرباح فروق أسعار الصرف (Exchange Profits)', type: 'profit_loss', currency: 'EGP', balance: 0 },

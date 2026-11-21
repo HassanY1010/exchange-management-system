@@ -37,7 +37,37 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
   const entryNumber = `JE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   return await prisma.$transaction(async (tx) => {
-    // Create Ledger Entry
+    // 1. Lock all affected accounts in deterministic sorted order before any inserts to eliminate deadlocks and race conditions
+    const uniqueAccountIds = Array.from(new Set(params.lines.map((l) => l.accountId))).sort();
+    const lockedAccountsMap = new Map<string, any>();
+
+    for (const accId of uniqueAccountIds) {
+      const rows = await tx.$queryRawUnsafe<any[]>(
+        'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance" FROM "Account" WHERE id = $1 FOR UPDATE',
+        accId
+      );
+      if (!rows || rows.length === 0) {
+        throw new Error(`الحساب المالي رقم ${accId} غير موجود`);
+      }
+      lockedAccountsMap.set(accId, rows[0]);
+    }
+
+    // 2. Pre-verify that withdrawals do not cause negative balances
+    for (const line of params.lines) {
+      const account = lockedAccountsMap.get(line.accountId);
+      const dCurrent = new Decimal(account.currentBalance?.toString() || '0');
+      const dDebit = new Decimal(line.debit || 0);
+      const dCredit = new Decimal(line.credit || 0);
+
+      if (['cash_safe', 'bank', 'bankak', 'employee_custody', 'expense'].includes(account.accountType)) {
+        const after = dCurrent.plus(dDebit).minus(dCredit);
+        if (after.isNegative() && ['cash_safe', 'employee_custody'].includes(account.accountType)) {
+          throw new Error(`رصيد الحساب ${account.name} غير كافٍ. الرصيد المتاح: ${dCurrent.toFixed(2)}، والمطلوب خصمه: ${dCredit.toFixed(2)}`);
+        }
+      }
+    }
+
+    // 3. Create Ledger Entry
     const entry = await tx.ledgerEntry.create({
       data: {
         entryNumber,
@@ -63,21 +93,13 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
       },
     });
 
-    // Update current balances of all affected accounts based on account type
+    // 4. Update current balances of all affected accounts based on account type
     for (const line of params.lines) {
-      const account = await tx.account.findUnique({
-        where: { id: line.accountId },
-      });
-      if (!account) {
-        throw new Error(`الحساب المالي رقم ${line.accountId} غير موجود`);
-      }
-
+      const account = lockedAccountsMap.get(line.accountId);
       const dCurrent = new Decimal(account.currentBalance?.toString() || '0');
       const dDebit = new Decimal(line.debit || 0);
       const dCredit = new Decimal(line.credit || 0);
 
-      // Asset accounts (cash_safe, bank, bankak, employee_custody): Debit increases, Credit decreases
-      // Liability / Equity / Revenue accounts: Credit increases, Debit decreases
       let newBalance: Decimal;
       if (['cash_safe', 'bank', 'bankak', 'employee_custody', 'expense'].includes(account.accountType)) {
         newBalance = dCurrent.plus(dDebit).minus(dCredit);
@@ -89,6 +111,8 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
         where: { id: account.id },
         data: { currentBalance: newBalance.toFixed(4) },
       });
+      // Update local map balance in case the same account appears multiple times in lines
+      account.currentBalance = newBalance.toFixed(4);
     }
 
     // Log to Audit Trail
