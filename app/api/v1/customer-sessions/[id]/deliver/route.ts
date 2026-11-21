@@ -13,8 +13,8 @@ export async function POST(
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
-  if (!['admin', 'accountant', 'custody_officer'].includes(user.role)) {
-    return NextResponse.json({ error: 'صلاحية صرف النقدية مقتصرة على أمين الصندوق، موظف العهدة، المحاسب أو المدير' }, { status: 403 });
+  if (!['admin', 'custody_officer'].includes(user.role)) {
+    return NextResponse.json({ error: 'صلاحية صرف النقدية مقتصرة على مسؤول العهدة والتسليم (أو المدير العام استثنائياً)' }, { status: 403 });
   }
 
   try {
@@ -61,10 +61,15 @@ export async function POST(
       const expected = new Decimal(locked.expectedAmount.toString());
 
       // Validate receipt satisfaction (Strict zero-unverified payout protection)
-      if (received.lessThan(expected) && !allowPartial) {
-        throw new Error(
-          `لا يمكن صرف النقدية للعميل قبل استيفاء واعتماد كامل إيصالات بنكك المطلوبة. المعتمد حالياً: ${received.toFixed(2)} SDG، والمطلوب: ${expected.toFixed(2)} SDG`
-        );
+      if (received.lessThan(expected)) {
+        if (!allowPartial || user.role !== 'admin') {
+          throw new Error(
+            `لا يمكن صرف النقدية للعميل قبل استيفاء واعتماد كامل إيصالات بنكك المطلوبة. المعتمد حالياً: ${received.toFixed(2)} SDG، والمطلوب: ${expected.toFixed(2)} SDG`
+          );
+        }
+        if (!notes || notes.trim().length < 5) {
+          throw new Error('يجب تقديم سبب توثيقي إلزامي (لا يقل عن 5 أحرف) لتجاوز الصرف الاستثنائي الجزئي بواسطة المدير العام');
+        }
       }
 
       return { isIdempotentReplay: false, session: locked };
@@ -248,9 +253,10 @@ export async function POST(
     });
 
     // 6. Record Audit Event
+    const isExceptional = user.role === 'admin' && Number(session.receivedAmount) < Number(session.expectedAmount);
     await logAuditEvent({
       userId: user.userId,
-      action: 'DELIVER_CUSTOMER_CASH',
+      action: isExceptional ? 'EXCEPTIONAL_CASH_DELIVERY' : 'DELIVER_CUSTOMER_CASH',
       entityType: 'CustomerSession',
       entityId: session.id,
       newValues: {
@@ -259,8 +265,12 @@ export async function POST(
         equivalentSdg,
         sourceAccount: sourceAccount.name,
         status: nextStatus,
+        performedByRole: user.role,
+        isExceptional,
       },
-      reason: `تسليم نقدية بالجنيه المصري للعميل ${session.customer.name} بموجب السند ${voucherNumber}`,
+      reason: isExceptional
+        ? `صرف نقدية استثنائي جزئي معتمد من المدير العام (${notes}) بموجب السند ${voucherNumber}`
+        : `تسليم نقدية بالجنيه المصري للعميل ${session.customer.name} بموجب السند ${voucherNumber}${notes ? ` - ملاحظات: ${notes}` : ''}`,
     });
 
     // 7. Dispatch Notification

@@ -28,6 +28,7 @@ export default function CustomerSessionsPage() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [rates, setRates] = useState<any[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -98,6 +99,15 @@ export default function CustomerSessionsPage() {
           if (cashAccounts.length > 0) setPayoutAccountId(cashAccounts[0].id);
         }
       });
+
+    fetch('/api/v1/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.user) {
+          setCurrentUserRole(data.user.role || '');
+        }
+      })
+      .catch(() => {});
 
     fetch('/api/v1/exchange-rates')
       .then((res) => res.json())
@@ -643,13 +653,20 @@ export default function CustomerSessionsPage() {
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between pt-3 border-t border-slate-100 gap-2">
                 <div className="flex items-center space-x-2 space-x-reverse">
                   {activeSession.status !== 'completed' && (
-                    <button
-                      onClick={() => openPayoutModal(activeSession)}
-                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse min-h-[44px]"
-                    >
-                      <DollarSign className="w-4 h-4" />
-                      <span>صرف وتسليم النقدية للعميل (Payout)</span>
-                    </button>
+                    currentUserRole === 'accountant' ? (
+                      <div className="px-3.5 py-2.5 bg-slate-100 text-slate-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 space-x-reverse border border-slate-200" title="الفصل بين المهام: صلاحية الصرف مقتصرة على مسؤول العهدة">
+                        <ShieldCheck className="w-4 h-4 text-slate-400" />
+                        <span>صرف النقدية محصور بمسؤول العهدة (مبدأ الفصل بين المهام)</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => openPayoutModal(activeSession)}
+                        className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse min-h-[44px]"
+                      >
+                        <DollarSign className="w-4 h-4" />
+                        <span>صرف وتسليم النقدية للعميل (Payout)</span>
+                      </button>
+                    )
                   )}
 
                   {activeSession.vouchers && activeSession.vouchers.length > 0 && (

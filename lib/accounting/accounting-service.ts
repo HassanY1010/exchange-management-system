@@ -61,7 +61,7 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
 
       if (['cash_safe', 'bank', 'bankak', 'employee_custody', 'expense'].includes(account.accountType)) {
         const after = dCurrent.plus(dDebit).minus(dCredit);
-        if (after.isNegative() && ['cash_safe', 'employee_custody'].includes(account.accountType)) {
+        if (after.isNegative() && ['cash_safe', 'employee_custody'].includes(account.accountType) && !['1060', '1065'].includes(account.accountCode) && account.accountType !== 'clearing') {
           throw new Error(`رصيد الحساب ${account.name} غير كافٍ. الرصيد المتاح: ${dCurrent.toFixed(2)}، والمطلوب خصمه: ${dCredit.toFixed(2)}`);
         }
       }
