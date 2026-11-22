@@ -122,22 +122,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const isBuyingSdg = transactionType === 'BUY_SDG_PAY_EGP';
-    const tradedCurrency = 'SDG';
-    const baseCurrency = 'EGP';
+    // Multi-currency resolution: detect traded currency (SDG, USD, SAR, etc.)
+    let tradedCurrency = 'SDG';
+    if (body.currency) {
+      tradedCurrency = body.currency.toUpperCase().trim();
+    } else if (transactionType.includes('_')) {
+      const parts = transactionType.split('_');
+      if (parts.length >= 2 && parts[1] !== 'EGP') {
+        tradedCurrency = parts[1].toUpperCase();
+      }
+    }
+    const baseCurrency = body.baseCurrency?.toUpperCase().trim() || 'EGP';
+    const isBuyingTraded = transactionType.startsWith('BUY_');
 
     // Locate accounts: Safes, Clearing, and Profit
     const egpSafe = paymentAccountId
       ? await prisma.account.findUnique({ where: { id: paymentAccountId } })
       : await prisma.account.findFirst({ where: { accountCode: '1010' } });
 
+    // Locate vault account for the traded currency
     const sdgSafe = vaultAccountId
       ? await prisma.account.findUnique({ where: { id: vaultAccountId } })
-      : (await prisma.account.findFirst({ where: { accountCode: '1020' } })) ||
-        (await prisma.account.findFirst({ where: { accountCode: '1030' } }));
+      : (await prisma.account.findFirst({
+          where: {
+            currency: tradedCurrency,
+            accountType: { in: ['cash_safe', 'bankak', 'bank'] },
+            status: 'active',
+          },
+        })) ||
+        (tradedCurrency === 'SDG'
+          ? (await prisma.account.findFirst({ where: { accountCode: '1020' } })) ||
+            (await prisma.account.findFirst({ where: { accountCode: '1030' } }))
+          : null);
 
     const clearingEgp = await prisma.account.findFirst({ where: { accountCode: '1060' } });
-    const clearingSdg = await prisma.account.findFirst({ where: { accountCode: '1065' } });
+    const clearingSdg =
+      (await prisma.account.findFirst({
+        where: { currency: tradedCurrency, accountCode: { in: ['1065', '1066', '1067'] } },
+      })) || (await prisma.account.findFirst({ where: { accountCode: '1065' } }));
     const profitAccount = await prisma.account.findFirst({ where: { accountCode: '4010' } });
 
     if (!egpSafe || !sdgSafe || !clearingEgp || !clearingSdg) {
@@ -156,8 +178,8 @@ export async function POST(req: NextRequest) {
       let profitAmount = 0;
       let wacRate = 0;
 
-      if (isBuyingSdg) {
-        // --- OPERATION 1: BUY SDG, PAY EGP ---
+      if (isBuyingTraded) {
+        // --- OPERATION 1: BUY TRADED CURRENCY, PAY BASE CURRENCY (EGP) ---
         // 1. Lock EGP safe and verify sufficiency
         const lockedEgpSafeRows = await tx.$queryRawUnsafe<any[]>(
           'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance" FROM "Account" WHERE id = $1 FOR UPDATE',
@@ -172,7 +194,7 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        // 2. Lock SDG safe
+        // 2. Lock Traded Currency Vault Safe
         await tx.$queryRawUnsafe(
           'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance" FROM "Account" WHERE id = $1 FOR UPDATE',
           sdgSafe.id
@@ -190,24 +212,24 @@ export async function POST(req: NextRequest) {
         wacRate = invResult.weightedAverageCost;
 
         // 4. Post Double-Entry Ledger Transactions inside tx
-        // Leg A: Receive SDG into SDG Vault
+        // Leg A: Receive Traded Currency into Vault
         await postLedgerTransaction({
-          entryType: 'supplier_purchase_sdg',
+          entryType: `supplier_purchase_${tradedCurrency.toLowerCase()}`,
           referenceType: 'SupplierTransaction',
-          description: `استلام ${dFrom.toNumber().toLocaleString()} SDG من المورد ${supplier.name} في ${sdgSafe.name}`,
+          description: `استلام ${dFrom.toNumber().toLocaleString()} ${tradedCurrency} من المورد ${supplier.name} في ${sdgSafe.name}`,
           createdBy: user.name,
           tx,
           lines: [
             {
               accountId: sdgSafe.id,
-              currency: 'SDG',
+              currency: tradedCurrency,
               debit: dFrom.toNumber(),
               credit: 0,
-              description: `إيداع عملة مشتراة من المورد ${supplier.name}`,
+              description: `إيداع عملة مشتراة (${tradedCurrency}) من المورد ${supplier.name}`,
             },
             {
               accountId: clearingSdg.id,
-              currency: 'SDG',
+              currency: tradedCurrency,
               debit: 0,
               credit: dFrom.toNumber(),
               description: `تسوية وسيط شراء العملة مع المورد ${supplier.name}`,
@@ -215,7 +237,7 @@ export async function POST(req: NextRequest) {
           ],
         });
 
-        // Leg B: Pay EGP from EGP Safe
+        // Leg B: Pay Base Currency (EGP) from Safe
         await postLedgerTransaction({
           entryType: 'supplier_payment_egp',
           referenceType: 'SupplierTransaction',
@@ -240,8 +262,8 @@ export async function POST(req: NextRequest) {
           ],
         });
       } else {
-        // --- OPERATION 2: SELL SDG, GET EGP ---
-        // 1. Lock SDG safe and verify sufficiency
+        // --- OPERATION 2: SELL TRADED CURRENCY, GET BASE CURRENCY (EGP) ---
+        // 1. Lock Traded Currency Vault Safe and verify sufficiency
         const lockedSdgSafeRows = await tx.$queryRawUnsafe<any[]>(
           'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance" FROM "Account" WHERE id = $1 FOR UPDATE',
           sdgSafe.id
@@ -251,7 +273,7 @@ export async function POST(req: NextRequest) {
 
         if (sdgBal.lessThan(dFrom)) {
           throw new Error(
-            `رصيد خزينة الجنيه السوداني (${lockedSdgSafe.name}) لا يكفي للتسليم. المتاح: ${sdgBal.toFixed(2)} SDG، والمطلوب بيعه: ${dFrom.toFixed(2)} SDG`
+            `رصيد خزينة ${tradedCurrency} (${lockedSdgSafe.name}) لا يكفي للتسليم. المتاح: ${sdgBal.toFixed(2)} ${tradedCurrency}، والمطلوب بيعه: ${dFrom.toFixed(2)} ${tradedCurrency}`
           );
         }
 
@@ -274,7 +296,7 @@ export async function POST(req: NextRequest) {
         wacRate = invSale.weightedAverageCost;
 
         // 4. Post Double-Entry Ledger Transactions inside tx
-        // Leg A: Receive EGP Revenue into EGP Safe
+        // Leg A: Receive Base Currency (EGP) Revenue into Safe
         await postLedgerTransaction({
           entryType: 'supplier_sale_revenue_egp',
           referenceType: 'SupplierTransaction',
@@ -299,24 +321,24 @@ export async function POST(req: NextRequest) {
           ],
         });
 
-        // Leg B: Deliver SDG from SDG Safe
+        // Leg B: Deliver Traded Currency from Vault
         await postLedgerTransaction({
-          entryType: 'supplier_sale_deliver_sdg',
+          entryType: `supplier_sale_deliver_${tradedCurrency.toLowerCase()}`,
           referenceType: 'SupplierTransaction',
-          description: `تسليم ${dFrom.toNumber().toLocaleString()} SDG للمورد ${supplier.name} من ${lockedSdgSafe.name}`,
+          description: `تسليم ${dFrom.toNumber().toLocaleString()} ${tradedCurrency} للمورد ${supplier.name} من ${lockedSdgSafe.name}`,
           createdBy: user.name,
           tx,
           lines: [
             {
               accountId: clearingSdg.id,
-              currency: 'SDG',
+              currency: tradedCurrency,
               debit: dFrom.toNumber(),
               credit: 0,
               description: `تسوية وسيط تسليم العملة للمورد ${supplier.name}`,
             },
             {
               accountId: lockedSdgSafe.id,
-              currency: 'SDG',
+              currency: tradedCurrency,
               debit: 0,
               credit: dFrom.toNumber(),
               description: `صرف عملة من ${lockedSdgSafe.name} للمورد ${supplier.name}`,
@@ -395,8 +417,8 @@ export async function POST(req: NextRequest) {
           cogsAmount,
           profitAmount,
           wacRate,
-          sourceAccountId: isBuyingSdg ? egpSafe.id : sdgSafe.id,
-          destinationAccountId: isBuyingSdg ? sdgSafe.id : egpSafe.id,
+          sourceAccountId: isBuyingTraded ? egpSafe.id : sdgSafe.id,
+          destinationAccountId: isBuyingTraded ? sdgSafe.id : egpSafe.id,
           notes: notes?.trim() || null,
           status: 'completed',
           createdBy: user.name,
@@ -422,7 +444,7 @@ export async function POST(req: NextRequest) {
         profitAmount: result.profitAmount,
         wacRate: result.wacRate,
       },
-      reason: `تنفيذ عملية ${isBuyingSdg ? 'شراء' : 'بيع'} عملة مع المورد ${supplier.name} وتحديث WAC والمخزون`,
+      reason: `تنفيذ عملية ${isBuyingTraded ? 'شراء' : 'بيع'} عملة مع المورد ${supplier.name} وتحديث WAC والمخزون`,
     });
 
     const updatedInventories = await CurrencyInventoryService.getAllInventories();
@@ -430,7 +452,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        message: `تم تنفيذ عملية ${isBuyingSdg ? 'شراء' : 'بيع'} العملة وترحيل القيود وتحديث WAC والمخزون بنجاح`,
+        message: `تم تنفيذ عملية ${isBuyingTraded ? 'شراء' : 'بيع'} العملة وترحيل القيود وتحديث WAC والمخزون بنجاح`,
         data: result.txn,
         inventories: updatedInventories,
       },

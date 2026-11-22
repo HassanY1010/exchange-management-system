@@ -41,23 +41,77 @@ export interface InventoryResult {
 export class CurrencyInventoryService {
   /**
    * Get or initialize currency inventory record
+   * Protects against concurrent creation races via atomic upsert
+   * Automatically initializes opening balance from existing cash safes if first time
    */
   static async getOrCreateInventory(currency: string, tx: any = prisma) {
+    const cur = currency.toUpperCase().trim();
     let inv = await tx.currencyInventory.findUnique({
-      where: { currency: currency.toUpperCase() },
+      where: { currency: cur },
     });
 
     if (!inv) {
-      inv = await tx.currencyInventory.create({
-        data: {
-          currency: currency.toUpperCase(),
-          baseCurrency: 'EGP',
-          currentQuantity: 0,
-          totalCostBase: 0,
-          weightedAverageCost: 0,
-          totalRealizedProfit: 0,
-        },
-      });
+      let initialQty = new Decimal(0);
+      let initialCost = new Decimal(0);
+      let initialWac = new Decimal(0);
+
+      try {
+        // Look up active cash safes/bank accounts for this currency
+        const existingSafes = await tx.account.findMany({
+          where: {
+            currency: cur,
+            accountType: { in: ['cash_safe', 'bank', 'bankak'] },
+            status: 'active',
+          },
+        });
+
+        if (existingSafes.length > 0) {
+          const totalSafeBal = existingSafes.reduce(
+            (sum: Decimal, a: any) => sum.plus(new Decimal(a.currentBalance?.toString() || '0')),
+            new Decimal(0)
+          );
+
+          if (totalSafeBal.greaterThan(0)) {
+            initialQty = totalSafeBal;
+            // Lookup exchange rate to estimate initial cost base
+            const latestRate = await tx.exchangeRate.findFirst({
+              where: { fromCurrency: cur, toCurrency: 'EGP' },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (latestRate && Number(latestRate.rate) > 0) {
+              const r = new Decimal(latestRate.rate.toString());
+              initialCost = cur === 'SDG' ? totalSafeBal.dividedBy(r) : totalSafeBal.times(r);
+              initialWac = initialCost.dividedBy(initialQty);
+            }
+          }
+        }
+      } catch (err) {
+        // Fallback to 0 if account lookup fails
+      }
+
+      // Atomic upsert with P2002 catch protects against race conditions on initial creation
+      try {
+        inv = await tx.currencyInventory.upsert({
+          where: { currency: cur },
+          create: {
+            currency: cur,
+            baseCurrency: 'EGP',
+            currentQuantity: initialQty.toNumber(),
+            totalCostBase: initialCost.toNumber(),
+            weightedAverageCost: initialWac.toNumber(),
+            totalRealizedProfit: 0,
+          },
+          update: {},
+        });
+      } catch (err: any) {
+        if (err.code === 'P2002' || err.message?.includes('Unique constraint')) {
+          inv = await tx.currencyInventory.findUnique({
+            where: { currency: cur },
+          });
+        } else {
+          throw err;
+        }
+      }
     }
 
     return inv;

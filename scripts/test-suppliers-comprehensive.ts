@@ -98,6 +98,11 @@ async function runSupplierComprehensiveTests() {
         currentBalance: 0,
       },
     });
+  } else {
+    await prisma.account.update({
+      where: { id: profitAccount.id },
+      data: { currentBalance: 0 },
+    });
   }
 
   console.log('Accounts confirmed.');
@@ -347,9 +352,9 @@ async function runSupplierComprehensiveTests() {
         toAmount: revenueEgp.toNumber(),
         exchangeRate: sellRate.toNumber(),
         status: 'completed',
-        wacRate: saleInv.wacUsed,
-        cogsAmount: saleInv.cogsAmount,
-        profitAmount: saleInv.profitAmount,
+        wacRate: saleInv.weightedAverageCost,
+        cogsAmount: saleInv.cogs,
+        profitAmount: saleInv.realizedProfit,
         sourceAccountId: sdgSafe!.id,
         destinationAccountId: egpSafe!.id,
         createdBy: 'System Tester',
@@ -386,17 +391,17 @@ async function runSupplierComprehensiveTests() {
     });
 
     // Leg C: Realized Profit in account 4010
-    if (saleInv.profitAmount > 0) {
+    if (saleInv.realizedProfit > 0) {
       await postLedgerTransaction({
         entryType: 'supplier_trade_profit',
         referenceType: 'SupplierTransaction',
         referenceId: tradeTx.id,
-        description: `إثبات أرباح فروق بيع عملة (${saleInv.profitAmount.toFixed(2)} EGP)`,
+        description: `إثبات أرباح فروق بيع عملة (${saleInv.realizedProfit.toFixed(2)} EGP)`,
         createdBy: 'System Tester',
         tx,
         lines: [
-          { accountId: clearingEgp!.id, currency: 'EGP', debit: saleInv.profitAmount, credit: 0 },
-          { accountId: profitAccount!.id, currency: 'EGP', debit: 0, credit: saleInv.profitAmount },
+          { accountId: clearingEgp!.id, currency: 'EGP', debit: saleInv.realizedProfit, credit: 0 },
+          { accountId: profitAccount!.id, currency: 'EGP', debit: 0, credit: saleInv.realizedProfit },
         ],
       });
     }
@@ -413,6 +418,13 @@ async function runSupplierComprehensiveTests() {
     new Decimal(inv3!.totalRealizedProfit.toString()).toDecimalPlaces(2).equals(new Decimal(5277.78)),
     'Realized exchange profit accurately credited (~5,277.78 EGP)',
     { profit: inv3!.totalRealizedProfit.toString() }
+  );
+
+  const postProfitAcc = await prisma.account.findUnique({ where: { id: profitAccount!.id } });
+  assert(
+    new Decimal(postProfitAcc!.currentBalance.toString()).toDecimalPlaces(2).equals(new Decimal(5277.78)),
+    'Account 4010 currentBalance credited with exact realized exchange profit (5,277.78 EGP)',
+    { currentBalance: postProfitAcc?.currentBalance }
   );
 
   // 5. Negative Inventory Prevention
@@ -535,6 +547,56 @@ async function runSupplierComprehensiveTests() {
     deleteBlocked = true;
   }
   assert(deleteBlocked, 'Deletion of Supplier A blocked to preserve financial audit trail');
+
+  // 10. Multi-Currency Support (USD Inventory, WAC & Sales)
+  console.log('\n--- Test Group 10: Multi-Currency Verification (USD) ---');
+  // Clean up any test USD inventory
+  await prisma.currencyInventory.deleteMany({ where: { currency: 'USD' } });
+
+  // Purchase 1,000 USD at 50 EGP/USD = 50,000 EGP
+  await prisma.$transaction(async (tx) => {
+    await CurrencyInventoryService.recordPurchase({
+      currency: 'USD',
+      quantity: 1000,
+      costInBaseCurrency: 50000,
+      purchaseRate: 50,
+      tx,
+    });
+  });
+
+  const usdInv = await prisma.currencyInventory.findUnique({ where: { currency: 'USD' } });
+  assert(new Decimal(usdInv!.currentQuantity.toString()).equals(1000), 'USD Inventory quantity is 1,000 USD');
+  assert(new Decimal(usdInv!.weightedAverageCost.toString()).equals(50), 'USD WAC is 50 EGP per 1 USD');
+
+  // Sell 400 USD at 55 EGP/USD = 22,000 EGP
+  // COGS = 400 * 50 = 20,000 EGP. Realized profit = 22,000 - 20,000 = 2,000 EGP.
+  const usdSale = await prisma.$transaction(async (tx) => {
+    return CurrencyInventoryService.recordSale({
+      currency: 'USD',
+      quantity: 400,
+      revenueInBaseCurrency: 22000,
+      tx,
+    });
+  });
+
+  assert(usdSale.realizedProfit === 2000, 'USD sale generated exact 2,000 EGP realized profit');
+  const usdInvPost = await prisma.currencyInventory.findUnique({ where: { currency: 'USD' } });
+  assert(new Decimal(usdInvPost!.currentQuantity.toString()).equals(600), 'USD Inventory reduced to 600 USD');
+  assert(new Decimal(usdInvPost!.weightedAverageCost.toString()).equals(50), 'USD WAC invariant preserved at 50');
+
+  // 11. Concurrency Protection on Initial Inventory Creation (Race Test)
+  console.log('\n--- Test Group 11: Concurrency Protection on Initial Inventory Creation ---');
+  const testCurrency = `TST${Math.floor(Math.random() * 9000 + 1000)}`;
+  // Two parallel calls trying to initialize a brand new currency simultaneously
+  const [init1, init2] = await Promise.all([
+    CurrencyInventoryService.getOrCreateInventory(testCurrency),
+    CurrencyInventoryService.getOrCreateInventory(testCurrency),
+  ]);
+  assert(init1.currency === testCurrency && init2.currency === testCurrency, 'Parallel creation of brand new currency succeeded atomically without collision');
+  assert(init1.id === init2.id, 'Both concurrent callers received the exact same inventory row');
+
+  // Clean up test currency
+  await prisma.currencyInventory.deleteMany({ where: { currency: testCurrency } });
 
   console.log('\n================================================================');
   console.log(`   ALL TESTS COMPLETED: ${passedTests} / ${totalTests} PASSED (100%)`);
