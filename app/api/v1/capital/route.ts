@@ -287,24 +287,25 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return { capitalTx, lockedSafe, lockedCapital, cur };
-    });
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: isAddition ? 'CAPITAL_ADD' : 'CAPITAL_WITHDRAW',
+        entityType: 'CapitalTransaction',
+        entityId: capitalTx.id,
+        newValues: {
+          id: capitalTx.id,
+          amount: dAmount.toNumber(),
+          currency: cur,
+          type: transactionType,
+          account: lockedSafe.name,
+          capitalAccount: lockedCapital.accountCode,
+        },
+        reason: description || (isAddition ? 'إضافة رأس مال' : 'سحب رأس مال'),
+        tx,
+      });
 
-    // 4. Audit Log
-    await logAuditEvent({
-      userId: user.userId,
-      action: isAddition ? 'CAPITAL_ADD' : 'CAPITAL_WITHDRAW',
-      entityType: 'CapitalTransaction',
-      entityId: result.capitalTx.id,
-      newValues: {
-        id: result.capitalTx.id,
-        amount: dAmount.toNumber(),
-        currency: result.cur,
-        type: transactionType,
-        account: result.lockedSafe.name,
-        capitalAccount: result.lockedCapital.accountCode,
-      },
-      reason: description || (isAddition ? 'إضافة رأس مال' : 'سحب رأس مال'),
+      return { capitalTx, lockedSafe, lockedCapital, cur };
     });
 
     return NextResponse.json(

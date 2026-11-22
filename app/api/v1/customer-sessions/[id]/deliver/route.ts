@@ -288,6 +288,27 @@ export async function POST(
 
       const isExceptional = user.role === 'admin' && Number(locked.receivedAmount) < Number(locked.expectedAmount);
 
+      // Record Audit Event inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: isExceptional ? 'EXCEPTIONAL_CASH_DELIVERY' : 'DELIVER_CUSTOMER_CASH',
+        entityType: 'CustomerSession',
+        entityId: updatedSession.id,
+        newValues: {
+          voucherNumber,
+          amountEgp,
+          equivalentSdg,
+          sourceAccount: sourceAccount.name,
+          status: nextStatus,
+          performedByRole: user.role,
+          isExceptional,
+        },
+        reason: isExceptional
+          ? `صرف نقدية استثنائي جزئي معتمد من المدير العام (${notes}) بموجب السند ${voucherNumber}`
+          : `تسليم نقدية بالجنيه المصري للعميل ${customerName} بموجب السند ${voucherNumber}${notes ? ` - ملاحظات: ${notes}` : ''}`,
+        tx,
+      });
+
       return {
         isIdempotentReplay: false,
         session: updatedSession,
@@ -312,26 +333,6 @@ export async function POST(
     }
 
     const resData = result as any;
-
-    // 6. Record Audit Event (Post-Transaction)
-    await logAuditEvent({
-      userId: user.userId,
-      action: resData.isExceptional ? 'EXCEPTIONAL_CASH_DELIVERY' : 'DELIVER_CUSTOMER_CASH',
-      entityType: 'CustomerSession',
-      entityId: resData.session.id,
-      newValues: {
-        voucherNumber: resData.voucherNumber,
-        amountEgp: resData.amountEgp,
-        equivalentSdg: resData.equivalentSdg,
-        sourceAccount: resData.sourceAccountName,
-        status: resData.nextStatus,
-        performedByRole: user.role,
-        isExceptional: resData.isExceptional,
-      },
-      reason: resData.isExceptional
-        ? `صرف نقدية استثنائي جزئي معتمد من المدير العام (${notes}) بموجب السند ${resData.voucherNumber}`
-        : `تسليم نقدية بالجنيه المصري للعميل ${resData.customerName} بموجب السند ${resData.voucherNumber}${notes ? ` - ملاحظات: ${notes}` : ''}`,
-    });
 
     // 7. Dispatch Notification
     await createNotification({

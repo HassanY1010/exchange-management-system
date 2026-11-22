@@ -453,7 +453,14 @@ model AuditLog {
   reason     String?
   ipAddress  String?
   userAgent  String?
+  status     String   @default("SUCCESS") // SUCCESS, FAILED
   createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType])
+  @@index([action])
+  @@index([userId])
+  @@index([status])
 }
 
 model Notification {

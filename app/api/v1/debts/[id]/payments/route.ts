@@ -285,6 +285,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         },
       });
 
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'DEBT_PAYMENT',
+        entityType: 'DebtPayment',
+        entityId: payment.id,
+        newValues: {
+          paymentId: payment.id,
+          debtNumber: updatedDebt.debtNumber,
+          type: isReceivable ? 'collection' : 'settlement',
+          amount: dPayAmount.toNumber(),
+          currency: cur,
+          paidSafe: lockedSafe.name,
+          newRemaining: newRemaining.toNumber(),
+          newStatus,
+        },
+        reason: notes || `تسجيل سداد دين رقم ${updatedDebt.debtNumber}`,
+        tx,
+      });
+
       return {
         payment,
         updatedDebt,
@@ -296,25 +316,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         newRemaining: newRemaining.toNumber(),
         newStatus,
       };
-    });
-
-    // 4. Audit Log
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'DEBT_PAYMENT',
-      entityType: 'DebtPayment',
-      entityId: result.payment.id,
-      newValues: {
-        paymentId: result.payment.id,
-        debtNumber: result.updatedDebt.debtNumber,
-        type: result.isReceivable ? 'collection' : 'settlement',
-        amount: dPayAmount.toNumber(),
-        currency: result.cur,
-        paidSafe: result.lockedSafe.name,
-        newRemaining: result.newRemaining,
-        newStatus: result.newStatus,
-      },
-      reason: notes || `تسجيل سداد دين رقم ${result.updatedDebt.debtNumber}`,
     });
 
     return NextResponse.json(

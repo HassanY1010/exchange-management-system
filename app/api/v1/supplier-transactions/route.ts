@@ -446,25 +446,27 @@ export async function POST(req: NextRequest) {
         include: { supplier: true },
       });
 
-      return { txn, cogsAmount, profitAmount, wacRate };
-    });
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'SUPPLIER_TRANSACTION',
+        entityType: 'SupplierTransaction',
+        entityId: txn.id,
+        newValues: {
+          transactionNumber,
+          supplier: supplier.name,
+          type: transactionType,
+          fromAmount: dFrom.toNumber(),
+          toAmount: dTo.toNumber(),
+          exchangeRate: dRate.toNumber(),
+          profitAmount,
+          wacRate,
+        },
+        reason: `تنفيذ عملية ${isBuyingTraded ? 'شراء' : 'بيع'} عملة مع المورد ${supplier.name} وتحديث WAC والمخزون`,
+        tx,
+      });
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'SUPPLIER_TRANSACTION',
-      entityType: 'SupplierTransaction',
-      entityId: result.txn.id,
-      newValues: {
-        transactionNumber,
-        supplier: supplier.name,
-        type: transactionType,
-        fromAmount: dFrom.toNumber(),
-        toAmount: dTo.toNumber(),
-        exchangeRate: dRate.toNumber(),
-        profitAmount: result.profitAmount,
-        wacRate: result.wacRate,
-      },
-      reason: `تنفيذ عملية ${isBuyingTraded ? 'شراء' : 'بيع'} عملة مع المورد ${supplier.name} وتحديث WAC والمخزون`,
+      return { txn, cogsAmount, profitAmount, wacRate };
     });
 
     const updatedInventories = await CurrencyInventoryService.getAllInventories();

@@ -289,25 +289,26 @@ export async function POST(req: NextRequest) {
         include: { category: true },
       });
 
-      return { newExpense, ledgerEntry, lockedSafe, lockedExp, cur };
-    });
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'RECORD_EXPENSE',
+        entityType: 'Expense',
+        entityId: newExpense.id,
+        newValues: {
+          expenseNumber: newExpense.expenseNumber,
+          category: category.name,
+          amount: dAmount.toNumber(),
+          currency: cur,
+          paidFromAccount: lockedSafe.name,
+          expenseAccount: lockedExp.accountCode,
+          expenseDate: dateStr,
+        },
+        reason: `تسجيل مصروف ${category.name} بمبلغ ${dAmount.toNumber().toLocaleString()} ${cur}`,
+        tx,
+      });
 
-    // 5. Audit Log
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'RECORD_EXPENSE',
-      entityType: 'Expense',
-      entityId: result.newExpense.id,
-      newValues: {
-        expenseNumber: result.newExpense.expenseNumber,
-        category: category.name,
-        amount: dAmount.toNumber(),
-        currency: result.cur,
-        paidFromAccount: result.lockedSafe.name,
-        expenseAccount: result.lockedExp.accountCode,
-        expenseDate: dateStr,
-      },
-      reason: `تسجيل مصروف ${category.name} بمبلغ ${dAmount.toNumber().toLocaleString()} ${result.cur}`,
+      return { newExpense, ledgerEntry, lockedSafe, lockedExp, cur };
     });
 
     return NextResponse.json(

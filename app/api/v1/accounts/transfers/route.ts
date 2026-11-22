@@ -349,25 +349,27 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        // Record Audit Log inside the same transaction
+        await logAuditEvent({
+          userId: user.userId,
+          action: 'FUND_TRANSFER',
+          entityType: 'AccountTransfer',
+          entityId: transferRecord.id,
+          newValues: {
+            transferNumber: transferRecord.transferNumber,
+            fromAccount: fromAcc.name,
+            toAccount: toAcc.name,
+            amount: Number(transferRecord.amount),
+            currency: transferRecord.currency,
+            toAmount: transferRecord.toAmount ? Number(transferRecord.toAmount) : null,
+            toCurrency: transferRecord.toCurrency,
+          },
+          reason: description || `تحويل مالي من ${fromAcc.name} إلى ${toAcc.name}`,
+          tx,
+        });
+
         return { transferRecord, ledgerEntry: leg1, fromAcc, toAcc };
       }
-    });
-
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'FUND_TRANSFER',
-      entityType: 'AccountTransfer',
-      entityId: result.transferRecord.id,
-      newValues: {
-        transferNumber: result.transferRecord.transferNumber,
-        fromAccount: result.fromAcc.name,
-        toAccount: result.toAcc.name,
-        amount: Number(result.transferRecord.amount),
-        currency: result.transferRecord.currency,
-        toAmount: result.transferRecord.toAmount ? Number(result.transferRecord.toAmount) : null,
-        toCurrency: result.transferRecord.toCurrency,
-      },
-      reason: description || `تحويل مالي من ${result.fromAcc.name} إلى ${result.toAcc.name}`,
     });
 
     return NextResponse.json({
