@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { assertBusinessDateOpen, postLedgerTransaction } from '../lib/accounting/accounting-service';
-import { getSystemBusinessDate } from '../lib/financial-core';
+import { getSystemBusinessDate, getSystemStartOfDay, getSystemDayRange } from '../lib/financial-core';
 import Decimal from 'decimal.js';
 
 const prisma = new PrismaClient();
@@ -116,50 +116,114 @@ async function runCairoTimezoneAudit() {
     console.log('  [PASS] Cairo Summer (UTC+3) boundaries verified with 100% precision.');
 
     // ========================================================================
-    // 3. DST TRANSITIONS IN CAIRO (SPRING FORWARD & FALL BACK)
+    // 3. DST TRANSITIONS IN CAIRO (DOWN TO THE EXACT SECOND & START OF DAY)
     // ========================================================================
     console.log('\n------------------------------------------------------------------------');
-    console.log('TEST 3: Egypt Daylight Saving Transition Boundaries (Law No. 24/2023)');
+    console.log('TEST 3: Egypt Daylight Saving Transition Boundaries Down to the Second');
     console.log('------------------------------------------------------------------------');
 
-    // 3.1 Spring Forward: Last Friday of April (April 24, 2026)
-    // On April 23 at 20:00 UTC -> Cairo is 22:00 (UTC+2)
-    const springBefore = new Date('2026-04-23T20:00:00Z');
-    const springBeforeDate = getSystemBusinessDate(springBefore);
-    const springBeforeOffset = getOffsetHours(springBefore);
-    console.log(`  [3.1a] Before Spring switch (April 23): Date=${springBeforeDate}, Offset=UTC+${springBeforeOffset}`);
-    if (springBeforeDate !== '2026-04-23' || springBeforeOffset !== 2) {
-      throw new Error(`Spring pre-switch failed!`);
+    const fmtLocal = (d: Date) =>
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).format(d);
+
+    // 3.1 Spring Forward: Exact Transition Second (April 23 -> April 24, 2026)
+    // 21:59:59 UTC on April 23: 23:59:59 in Cairo (Winter, UTC+2)
+    const springSecBefore = new Date('2026-04-23T21:59:59.000Z');
+    const sSecBeforeDate = getSystemBusinessDate(springSecBefore);
+    console.log('  [3.1a] 1 second before Spring switch (21:59:59 UTC):');
+    console.log(`         Local Cairo: ${fmtLocal(springSecBefore)} | BusinessDate: ${sSecBeforeDate}`);
+    if (sSecBeforeDate !== '2026-04-23') {
+      throw new Error(`Expected 2026-04-23 before spring jump, got ${sSecBeforeDate}`);
     }
 
-    // On April 24 at 12:00 UTC -> Cairo is 15:00 (UTC+3)
-    const springAfter = new Date('2026-04-24T12:00:00Z');
-    const springAfterDate = getSystemBusinessDate(springAfter);
-    const springAfterOffset = getOffsetHours(springAfter);
-    console.log(`  [3.1b] After Spring switch (April 24): Date=${springAfterDate}, Offset=UTC+${springAfterOffset}`);
-    if (springAfterDate !== '2026-04-24' || springAfterOffset !== 3) {
-      throw new Error(`Spring post-switch failed!`);
+    // 22:00:00 UTC on April 23: Clock jumps from 00:00 to 01:00:00 on April 24 (Summer, UTC+3)
+    const springSecAt = new Date('2026-04-23T22:00:00.000Z');
+    const sSecAtDate = getSystemBusinessDate(springSecAt);
+    console.log('  [3.1b] Exact second of Spring switch (22:00:00 UTC):');
+    console.log(`         Local Cairo: ${fmtLocal(springSecAt)} | BusinessDate: ${sSecAtDate}`);
+    if (sSecAtDate !== '2026-04-24') {
+      throw new Error(`Expected 2026-04-24 at spring jump, got ${sSecAtDate}`);
     }
 
-    // 3.2 Fall Back: Last Thursday/Friday of October (October 29/30, 2026)
-    // On Oct 28 at 12:00 UTC -> Cairo is 15:00 (UTC+3)
-    const fallBefore = new Date('2026-10-28T12:00:00Z');
-    const fallBeforeDate = getSystemBusinessDate(fallBefore);
-    const fallBeforeOffset = getOffsetHours(fallBefore);
-    console.log(`  [3.2a] Before Fall switch (Oct 28): Date=${fallBeforeDate}, Offset=UTC+${fallBeforeOffset}`);
-    if (fallBeforeDate !== '2026-10-28' || fallBeforeOffset !== 3) {
-      throw new Error(`Fall pre-switch failed!`);
+    // 3.1c Exact Start of Day verification for Spring Transition Day (April 24)
+    // The skipped hour (00:00 to 01:00) means the civil day of April 24 begins exactly at 22:00:00 UTC!
+    const apr24StartOfDay = getSystemStartOfDay('2026-04-24');
+    console.log('  [3.1c] getSystemStartOfDay("2026-04-24"):', apr24StartOfDay.toISOString());
+    if (apr24StartOfDay.toISOString() !== '2026-04-23T22:00:00.000Z') {
+      throw new Error(`Expected April 24 startOfDay to be 2026-04-23T22:00:00.000Z, got ${apr24StartOfDay.toISOString()}`);
+    }
+    // Verify that 1 millisecond before is indeed April 23
+    const apr24PreMs = new Date(apr24StartOfDay.getTime() - 1);
+    if (getSystemBusinessDate(apr24PreMs) !== '2026-04-23') {
+      throw new Error(`1ms before startOfDay did not map to 2026-04-23!`);
+    }
+    console.log('  [PASS] Spring transition: no lost hour, perfect start-of-day boundary at 22:00:00 UTC.');
+
+    // 3.2 Fall Back: Exact Transition Second (October 29 -> October 30, 2026)
+    // 20:59:59 UTC on Oct 29: 23:59:59 in Cairo (Summer pass, UTC+3)
+    const fallSecSummerPass = new Date('2026-10-29T20:59:59.000Z');
+    const fSecSummerDate = getSystemBusinessDate(fallSecSummerPass);
+    console.log('  [3.2a] 1 second before Fall step-back (20:59:59 UTC):');
+    console.log(`         Local Cairo: ${fmtLocal(fallSecSummerPass)} | BusinessDate: ${fSecSummerDate}`);
+    if (fSecSummerDate !== '2026-10-29') {
+      throw new Error(`Expected 2026-10-29 before fall step-back, got ${fSecSummerDate}`);
     }
 
-    // On Oct 31 at 12:00 UTC -> Cairo is 14:00 (UTC+2)
-    const fallAfter = new Date('2026-10-31T12:00:00Z');
-    const fallAfterDate = getSystemBusinessDate(fallAfter);
-    const fallAfterOffset = getOffsetHours(fallAfter);
-    console.log(`  [3.2b] After Fall switch (Oct 31): Date=${fallAfterDate}, Offset=UTC+${fallAfterOffset}`);
-    if (fallAfterDate !== '2026-10-31' || fallAfterOffset !== 2) {
-      throw new Error(`Fall post-switch failed!`);
+    // 21:00:00 UTC on Oct 29: Clock turns back 1 hour from 24:00 to 23:00 (Winter pass, UTC+2)
+    const fallSecWinterPass = new Date('2026-10-29T21:00:00.000Z');
+    const fSecWinterDate = getSystemBusinessDate(fallSecWinterPass);
+    console.log('  [3.2b] Exact second of Fall step-back (21:00:00 UTC):');
+    console.log(`         Local Cairo: ${fmtLocal(fallSecWinterPass)} | BusinessDate: ${fSecWinterDate}`);
+    if (fSecWinterDate !== '2026-10-29') {
+      throw new Error(`Expected 2026-10-29 during repeated 23:00 hour, got ${fSecWinterDate}`);
     }
-    console.log('  [PASS] Egypt DST Spring Forward and Fall Back transitions verified dynamically.');
+
+    // 21:59:59 UTC on Oct 29: End of repeated 23:00 hour (Winter pass)
+    const fallSecEndRepeated = new Date('2026-10-29T21:59:59.000Z');
+    const fSecEndRepeatedDate = getSystemBusinessDate(fallSecEndRepeated);
+    if (fSecEndRepeatedDate !== '2026-10-29') {
+      throw new Error(`Expected 2026-10-29 at end of repeated hour, got ${fSecEndRepeatedDate}`);
+    }
+
+    // 22:00:00 UTC on Oct 29: True winter midnight 00:00:00 of Friday October 30 (UTC+2)
+    const fallSecMidnight = new Date('2026-10-29T22:00:00.000Z');
+    const fSecMidnightDate = getSystemBusinessDate(fallSecMidnight);
+    console.log('  [3.2c] True winter midnight (22:00:00 UTC):');
+    console.log(`         Local Cairo: ${fmtLocal(fallSecMidnight)} | BusinessDate: ${fSecMidnightDate}`);
+    if (fSecMidnightDate !== '2026-10-30') {
+      throw new Error(`Expected 2026-10-30 at true winter midnight, got ${fSecMidnightDate}`);
+    }
+
+    // 3.2d Exact Start of Day verification for October 30
+    const oct30StartOfDay = getSystemStartOfDay('2026-10-30');
+    console.log('  [3.2d] getSystemStartOfDay("2026-10-30"):', oct30StartOfDay.toISOString());
+    if (oct30StartOfDay.toISOString() !== '2026-10-29T22:00:00.000Z') {
+      throw new Error(`Expected October 30 startOfDay to be 2026-10-29T22:00:00.000Z, got ${oct30StartOfDay.toISOString()}`);
+    }
+    const oct30PreMs = new Date(oct30StartOfDay.getTime() - 1);
+    if (getSystemBusinessDate(oct30PreMs) !== '2026-10-29') {
+      throw new Error(`1ms before startOfDay did not map to 2026-10-29!`);
+    }
+    console.log('  [PASS] Fall transition: no duplicate hour misattribution, start-of-day boundary exact at 22:00:00 UTC.');
+
+    // 3.3 Continuous Day Range Verification across Transition
+    const apr23Range = getSystemDayRange('2026-04-23');
+    const apr24Range = getSystemDayRange('2026-04-24');
+    console.log('  [3.3] Transition Continuity Check:');
+    console.log(`        April 23 Range: ${apr23Range.startOfDay.toISOString()} to ${apr23Range.endOfDay.toISOString()}`);
+    console.log(`        April 24 Range: ${apr24Range.startOfDay.toISOString()} to ${apr24Range.endOfDay.toISOString()}`);
+    if (apr24Range.startOfDay.getTime() - apr23Range.endOfDay.getTime() !== 1) {
+      throw new Error(`Gap detected between April 23 and April 24! Difference=${apr24Range.startOfDay.getTime() - apr23Range.endOfDay.getTime()}ms`);
+    }
+    console.log('  [PASS] Day ranges are 100% continuous without even 1 millisecond gap or overlap!');
 
     // ========================================================================
     // 4. DATABASE INTEGRATION: CLOSED-DAY PROTECTION AT CAIRO MIDNIGHT

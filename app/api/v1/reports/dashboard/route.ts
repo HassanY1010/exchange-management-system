@@ -1,36 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-
-/**
- * Calculates start of day in the configured timezone (e.g. Africa/Cairo)
- */
-function getStartOfDayForTimezone(tz: string = 'Africa/Cairo'): { todayStr: string; startOfDay: Date } {
-  try {
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-    const todayStr = formatter.format(new Date());
-
-    const now = new Date();
-    const utcDate = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
-    const tzDate = new Date(now.toLocaleString('en-US', { timeZone: tz }));
-    const diffMinutes = (tzDate.getTime() - utcDate.getTime()) / (1000 * 60);
-
-    const [year, month, day] = todayStr.split('-').map(Number);
-    const midnightUtcTimestamp = Date.UTC(year, month - 1, day, 0, 0, 0) - diffMinutes * 60 * 1000;
-    const startOfDay = new Date(midnightUtcTimestamp);
-
-    return { todayStr, startOfDay };
-  } catch (e) {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
-    return { todayStr, startOfDay };
-  }
-}
+import { getSystemBusinessDate, getSystemStartOfDay } from '@/lib/financial-core';
 
 export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -39,7 +10,8 @@ export async function GET(req: NextRequest) {
   // Resolve configured timezone (defaults to Africa/Cairo for Egypt UTC+2 / UTC+3)
   const tzSetting = await prisma.setting.findUnique({ where: { key: 'timezone' } }).catch(() => null);
   const timeZone = tzSetting?.value || 'Africa/Cairo';
-  const { todayStr, startOfDay } = getStartOfDayForTimezone(timeZone);
+  const todayStr = getSystemBusinessDate(new Date(), timeZone);
+  const startOfDay = getSystemStartOfDay(todayStr, timeZone);
 
   // 1. Fetch Accounts
   const accounts = await prisma.account.findMany({

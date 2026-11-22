@@ -23,6 +23,66 @@ export function getSystemBusinessDate(
   return new Intl.DateTimeFormat('en-CA', { timeZone }).format(d);
 }
 
+/**
+ * Calculates the exact UTC instant of the start of a business day (00:00:00 local time)
+ * for a given date or today in the target timezone (defaults to Africa/Cairo).
+ * Dynamically handles Daylight Saving Time (DST) switches without missing or duplicate hours.
+ */
+export function getSystemStartOfDay(
+  inputDate?: Date | string | null,
+  timeZone: string = 'Africa/Cairo'
+): Date {
+  const targetDateStr =
+    inputDate && typeof inputDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(inputDate)
+      ? inputDate
+      : getSystemBusinessDate(inputDate || new Date(), timeZone);
+
+  const [year, month, day] = targetDateStr.split('-').map(Number);
+  // In Egypt (UTC+2 or UTC+3), start of day occurs between 20:00 and 23:00 UTC of previous day.
+  // Search over [18:00 prev day, 06:00 target day]
+  let low = Date.UTC(year, month - 1, day - 1, 18, 0, 0, 0);
+  let high = Date.UTC(year, month - 1, day, 6, 0, 0, 0);
+  let startOfDayMs = high;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const dateStr = getSystemBusinessDate(new Date(mid), timeZone);
+    if (dateStr >= targetDateStr) {
+      startOfDayMs = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+
+  return new Date(startOfDayMs);
+}
+
+/**
+ * Returns the exact UTC start and end timestamps covering an entire business day in Cairo
+ * without any gap or overlap, even across Daylight Saving Time transitions.
+ */
+export function getSystemDayRange(
+  inputDate?: Date | string | null,
+  timeZone: string = 'Africa/Cairo'
+): { businessDate: string; startOfDay: Date; endOfDay: Date } {
+  const businessDate =
+    inputDate && typeof inputDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(inputDate)
+      ? inputDate
+      : getSystemBusinessDate(inputDate || new Date(), timeZone);
+
+  const startOfDay = getSystemStartOfDay(businessDate, timeZone);
+
+  // Compute next day string
+  const [year, month, day] = businessDate.split('-').map(Number);
+  const nextDayAnchor = new Date(Date.UTC(year, month - 1, day + 1, 12, 0, 0));
+  const nextDayStr = getSystemBusinessDate(nextDayAnchor, timeZone);
+  const nextStartOfDay = getSystemStartOfDay(nextDayStr, timeZone);
+  const endOfDay = new Date(nextStartOfDay.getTime() - 1);
+
+  return { businessDate, startOfDay, endOfDay };
+}
+
 export interface ExchangeCalculationInput {
   amount: number | string;
   rate: number | string;
