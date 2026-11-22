@@ -136,25 +136,27 @@ export async function POST(
         },
       });
 
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'SETTLE_CUSTODY',
+        entityType: 'EmployeeCustody',
+        entityId: params.id,
+        newValues: {
+          status: 'closed',
+          returnedAmount,
+          currency: lockedCustody.currency,
+        },
+        reason: `تسوية وإغلاق العهدة النقدية للموظف ${employee?.name || 'الموظف'} نهائياً`,
+        tx,
+      });
+
       return {
         closedCustody,
         returnedAmount,
         employeeName: employee?.name || 'الموظف',
         currency: lockedCustody.currency,
       };
-    });
-
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'SETTLE_CUSTODY',
-      entityType: 'EmployeeCustody',
-      entityId: params.id,
-      newValues: {
-        status: 'closed',
-        returnedAmount: result.returnedAmount,
-        currency: result.currency,
-      },
-      reason: `تسوية وإغلاق العهدة النقدية للموظف ${result.employeeName} نهائياً`,
     });
 
     return NextResponse.json({

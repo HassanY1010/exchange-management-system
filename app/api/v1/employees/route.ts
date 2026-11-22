@@ -131,19 +131,21 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return { employee, custodyAccount };
-    });
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'CREATE_EMPLOYEE',
+        entityType: 'Employee',
+        entityId: employee.id,
+        newValues: {
+          employee,
+          custodyAccount: custodyAccount.accountCode,
+        },
+        reason: 'إضافة موظف جديد وإنشاء حساب عهدة مخصص',
+        tx,
+      });
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'CREATE_EMPLOYEE',
-      entityType: 'Employee',
-      entityId: result.employee.id,
-      newValues: {
-        employee: result.employee,
-        custodyAccount: result.custodyAccount.accountCode,
-      },
-      reason: 'إضافة موظف جديد وإنشاء حساب عهدة مخصص',
+      return { employee, custodyAccount };
     });
 
     return NextResponse.json({ success: true, data: result.employee }, { status: 201 });

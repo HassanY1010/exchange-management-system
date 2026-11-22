@@ -3,6 +3,8 @@ import { generateToken } from '../lib/auth';
 import { logAuditEvent, sanitizeAuditData } from '../lib/audit';
 import { GET as getAuditLogs, POST as postAuditLogs, PUT as putAuditLogs, DELETE as deleteAuditLogs } from '../app/api/v1/audit-logs/route';
 import { GET as getSingleLog, PUT as putSingleLog, DELETE as deleteSingleLog } from '../app/api/v1/audit-logs/[id]/route';
+import { POST as logoutPost } from '../app/api/v1/auth/me/route';
+import { POST as createExpenseCategoryPost } from '../app/api/v1/expenses/categories/route';
 
 function createMockReq(url: string, role?: string, method = 'GET') {
   const headers = new Headers();
@@ -289,8 +291,84 @@ async function runAuditLogsProductionTests() {
     console.log(`Current total audit logs in DB: ${totalInDb}`);
     assert(totalInDb >= 1249, `Historical records preserved without any data loss (${totalInDb} >= 1249)`);
 
+    // -------------------------------------------------------------
+    // 10. Newly Audited Routes Verification (Logout & Expense Category)
+    // -------------------------------------------------------------
+    console.log('\n--- Group 10: Specific Operation Audit Tracing ---');
+
+    const adminUser = await prisma.user.findFirst({ where: { role: { name: 'admin' } } });
+    if (!adminUser) throw new Error('No admin user found');
+
+    const adminAuthToken = generateToken({
+      userId: adminUser.id,
+      email: adminUser.email,
+      name: adminUser.name,
+      role: 'admin',
+    });
+
+    // 10.1 Test Logout Audit
+    const logoutReq = {
+      method: 'POST',
+      url: 'http://localhost:3000/api/v1/auth/me',
+      headers: new Headers({
+        authorization: `Bearer ${adminAuthToken}`,
+      }),
+      cookies: {
+        get: (name: string) => (name === 'auth_token' ? { value: adminAuthToken } : undefined),
+        delete: () => {},
+      },
+    } as any;
+
+    const logoutRes = await logoutPost(logoutReq);
+    assert(logoutRes.status === 200, 'Logout returns HTTP 200');
+
+    const logoutLog = await prisma.auditLog.findFirst({
+      where: {
+        userId: adminUser.id,
+        action: 'USER_LOGOUT',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    assert(logoutLog !== null, 'USER_LOGOUT audit log recorded');
+    assert(logoutLog?.entityType === 'User', 'Logout entityType is User');
+
+    // 10.2 Test Expense Category Creation Audit
+    const catName = `اختبار فئة ${Date.now()}`;
+    const catReq = {
+      method: 'POST',
+      url: 'http://localhost:3000/api/v1/expenses/categories',
+      headers: new Headers({
+        authorization: `Bearer ${adminAuthToken}`,
+      }),
+      cookies: {
+        get: () => undefined,
+      },
+      json: async () => ({
+        name: catName,
+        description: 'فئة مصاريف تجريبية للتدقيق',
+      }),
+    } as any;
+
+    const catRes = await createExpenseCategoryPost(catReq);
+    const catData = await catRes.json();
+    assert(catRes.status === 201 && catData.success === true, 'Expense category created with HTTP 201');
+
+    const catLog = await prisma.auditLog.findFirst({
+      where: {
+        action: 'CREATE_EXPENSE_CATEGORY',
+        entityId: catData.data.id,
+      },
+    });
+    assert(catLog !== null, 'CREATE_EXPENSE_CATEGORY audit log recorded');
+    assert(catLog?.userId === adminUser.id, 'Audit log correctly attributed to user');
+
+    // Cleanup test records
+    await prisma.expenseCategory.delete({ where: { id: catData.data.id } });
+    if (catLog) await prisma.auditLog.delete({ where: { id: catLog.id } });
+    if (logoutLog) await prisma.auditLog.delete({ where: { id: logoutLog.id } });
+
     console.log('\n================================================================');
-    console.log('   🎉 ALL 9 AUDIT LOGS PRODUCTION TEST GROUPS PASSED (100%)    ');
+    console.log('   🎉 ALL 10 AUDIT LOGS PRODUCTION TEST GROUPS PASSED (100%)   ');
     console.log('================================================================\n');
   } catch (err: any) {
     console.error('Audit tests failed:', err.message);

@@ -67,9 +67,9 @@ export async function POST(req: NextRequest) {
 
     const statementNumber = `STMT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // Atomic transaction for statement and lines creation
+    // Atomic transaction for statement, lines, and audit log creation
     const statement = await prisma.$transaction(async (tx) => {
-      return await tx.bankStatement.create({
+      const createdStmt = await tx.bankStatement.create({
         data: {
           statementNumber,
           filename: filename || `bankak-statement-${Date.now()}.csv`,
@@ -98,15 +98,18 @@ export async function POST(req: NextRequest) {
           lines: true,
         },
       });
-    });
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'IMPORT_BANK_STATEMENT',
-      entityType: 'BankStatement',
-      entityId: statement.id,
-      newValues: { statementNumber, totalLines: parsedLines.length, fileHash },
-      reason: `استيراد كشف حساب بنكك (${parsedLines.length} حركة)`,
+      await logAuditEvent({
+        tx,
+        userId: user.userId,
+        action: 'IMPORT_BANK_STATEMENT',
+        entityType: 'BankStatement',
+        entityId: createdStmt.id,
+        newValues: { statementNumber, totalLines: parsedLines.length, fileHash },
+        reason: `استيراد كشف حساب بنكك (${parsedLines.length} حركة)`,
+      });
+
+      return createdStmt;
     });
 
     await createNotification({

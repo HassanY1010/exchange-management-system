@@ -139,22 +139,23 @@ export async function POST(
         include: { customer: true },
       });
 
+      // Record Audit log inside atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'SETTLE_OVERPAYMENT',
+        entityType: 'CustomerSession',
+        entityId: updated.id,
+        newValues: { overpaymentAmount: overpaymentNum, action, notes },
+        reason: `تسوية فائض سداد جلسة ${locked.sessionNumber} بإجراء ${action}`,
+        tx,
+      });
+
       return {
         session: updated,
         overpaymentNum,
         customerName,
         sessionNumber: locked.sessionNumber,
       };
-    });
-
-    // Audit log (Post-Transaction)
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'SETTLE_OVERPAYMENT',
-      entityType: 'CustomerSession',
-      entityId: result.session.id,
-      newValues: { overpaymentAmount: result.overpaymentNum, action, notes },
-      reason: `تسوية فائض سداد جلسة ${result.sessionNumber} بإجراء ${action}`,
     });
 
     // Notification

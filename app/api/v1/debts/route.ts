@@ -362,25 +362,26 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return { newDebt, ledgerEntry };
-    });
+      // Record Audit Log inside atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'CREATE_DEBT',
+        entityType: 'Debt',
+        entityId: newDebt.id,
+        newValues: {
+          debtNumber: newDebt.debtNumber,
+          type: isReceivable ? 'receivable' : 'payable',
+          party: effectivePartyName,
+          partyType,
+          amount: dAmount.toNumber(),
+          currency: cur,
+          dueDate,
+        },
+        reason: desc,
+        tx,
+      });
 
-    // 3. Audit Log
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'CREATE_DEBT',
-      entityType: 'Debt',
-      entityId: result.newDebt.id,
-      newValues: {
-        debtNumber: result.newDebt.debtNumber,
-        type: isReceivable ? 'receivable' : 'payable',
-        party: effectivePartyName,
-        partyType,
-        amount: dAmount.toNumber(),
-        currency: cur,
-        dueDate,
-      },
-      reason: desc,
+      return { newDebt, ledgerEntry };
     });
 
     return NextResponse.json(

@@ -156,6 +156,22 @@ export async function POST(
         }
       }
 
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'CUSTODY_DELIVERY',
+        entityType: 'EmployeeCustody',
+        entityId: params.id,
+        newValues: {
+          customer: customer.name,
+          deliveredAmount: deliverAmount,
+          currency: lockedCustody.currency,
+          remainingCustody: newCustodyBalance,
+        },
+        reason: `تسليم نقدية رسمية للعميل ${customer.name} من عهدة ${employee?.name || 'الموظف'}`,
+        tx,
+      });
+
       return {
         newCustodyBalance,
         custodyTxn,
@@ -164,20 +180,6 @@ export async function POST(
         accountId: lockedCustody.accountId,
         currency: lockedCustody.currency,
       };
-    });
-
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'CUSTODY_DELIVERY',
-      entityType: 'EmployeeCustody',
-      entityId: params.id,
-      newValues: {
-        customer: result.customerName,
-        deliveredAmount: deliverAmount,
-        currency: result.currency,
-        remainingCustody: result.newCustodyBalance,
-      },
-      reason: `تسليم نقدية رسمية للعميل ${result.customerName} من عهدة ${result.employeeName}`,
     });
 
     return NextResponse.json({

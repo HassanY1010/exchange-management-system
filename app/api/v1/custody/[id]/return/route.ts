@@ -139,6 +139,23 @@ export async function POST(
         ],
       });
 
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'CUSTODY_RETURN',
+        entityType: 'EmployeeCustody',
+        entityId: params.id,
+        newValues: {
+          returnAmount,
+          currency: lockedCustody.currency,
+          targetSafe: targetSafe.name,
+          remainingCustody: newCustodyBalance,
+          status: newStatus,
+        },
+        reason: `استرجاع مبالغ نقدية من عهدة ${employee?.name || 'الموظف'} إلى ${targetSafe.name}`,
+        tx,
+      });
+
       return {
         newCustodyBalance,
         newStatus,
@@ -147,21 +164,6 @@ export async function POST(
         employeeName: employee?.name || 'الموظف',
         currency: lockedCustody.currency,
       };
-    });
-
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'CUSTODY_RETURN',
-      entityType: 'EmployeeCustody',
-      entityId: params.id,
-      newValues: {
-        returnAmount,
-        currency: result.currency,
-        targetSafe: result.safeName,
-        remainingCustody: result.newCustodyBalance,
-        status: result.newStatus,
-      },
-      reason: `استرجاع مبالغ نقدية من عهدة ${result.employeeName} إلى ${result.safeName}`,
     });
 
     return NextResponse.json({

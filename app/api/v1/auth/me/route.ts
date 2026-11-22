@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { prisma } from '@/lib/db';
+import { logAuditEvent } from '@/lib/audit';
 
 export async function GET(req: NextRequest) {
   const userPayload = await getUserFromRequest(req);
@@ -38,7 +39,18 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const userPayload = await getUserFromRequest(req);
+  if (userPayload) {
+    await logAuditEvent({
+      userId: userPayload.userId,
+      action: 'USER_LOGOUT',
+      entityType: 'User',
+      entityId: userPayload.userId,
+      newValues: { email: userPayload.email, role: userPayload.role },
+      reason: 'تسجيل خروج المستخدم من النظام',
+    });
+  }
   const res = NextResponse.json({ success: true, message: 'تم تسجيل الخروج بنجاح' });
   res.cookies.delete('auth_token');
   return res;

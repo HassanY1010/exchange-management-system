@@ -64,23 +64,24 @@ export async function POST(
         },
       });
 
-      return updated;
-    });
+      // Record audit event inside atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'VERIFY_BANKAK_RECEIPT',
+        entityType: 'BankakReceipt',
+        entityId: updated.id,
+        oldValues: { status: 'pending_review' },
+        newValues: {
+          status: 'verified',
+          verifiedBy: user.name,
+          verificationSource,
+          notes: verificationNotes,
+        },
+        reason: `التحقق من وصول الحوالة البنكية رقم ${updated.transactionId}`,
+        tx,
+      });
 
-    // Record audit event
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'VERIFY_BANKAK_RECEIPT',
-      entityType: 'BankakReceipt',
-      entityId: verifiedReceipt.id,
-      oldValues: { status: 'pending_review' },
-      newValues: {
-        status: 'verified',
-        verifiedBy: user.name,
-        verificationSource,
-        notes: verificationNotes,
-      },
-      reason: `التحقق من وصول الحوالة البنكية رقم ${verifiedReceipt.transactionId}`,
+      return updated;
     });
 
     // Send targeted notification to accountant for financial approval

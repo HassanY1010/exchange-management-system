@@ -47,17 +47,20 @@ export async function POST(
         include: { customer: true },
       });
 
-      return { receipt: updated, oldStatus: locked[0].status };
-    });
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'REJECT_BANKAK_RECEIPT',
+        entityType: 'BankakReceipt',
+        entityId: updated.id,
+        oldValues: { status: locked[0].status },
+        newValues: { status: 'rejected', reason: reason.trim() },
+        reason: `رفض الإيصال رقم ${updated.transactionId}: ${reason.trim()}`,
+        status: 'FAILED',
+        tx,
+      });
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'REJECT_BANKAK_RECEIPT',
-      entityType: 'BankakReceipt',
-      entityId: receipt.id,
-      oldValues: { status: oldStatus },
-      newValues: { status: 'rejected', reason: reason.trim() },
-      reason: `رفض الإيصال رقم ${receipt.transactionId}: ${reason.trim()}`,
+      return { receipt: updated, oldStatus: locked[0].status };
     });
 
     await createNotification({

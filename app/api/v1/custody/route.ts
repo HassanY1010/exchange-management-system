@@ -260,21 +260,23 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return { custody, custodyTxn, safeName: lockedSafe.name };
-    });
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'ISSUE_CUSTODY',
+        entityType: 'EmployeeCustody',
+        entityId: custody.id,
+        newValues: {
+          employee: employee.name,
+          amount: dAmount.toNumber(),
+          currency,
+          sourceSafe: lockedSafe.name,
+        },
+        reason: `تسليم عهدة نقدية رسمية للموظف ${employee.name}`,
+        tx,
+      });
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'ISSUE_CUSTODY',
-      entityType: 'EmployeeCustody',
-      entityId: result.custody.id,
-      newValues: {
-        employee: employee.name,
-        amount: dAmount.toNumber(),
-        currency,
-        sourceSafe: result.safeName,
-      },
-      reason: `تسليم عهدة نقدية رسمية للموظف ${employee.name}`,
+      return { custody, custodyTxn, safeName: lockedSafe.name };
     });
 
     return NextResponse.json({ success: true, data: result.custody }, { status: 201 });

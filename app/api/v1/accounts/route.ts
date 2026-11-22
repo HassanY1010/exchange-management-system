@@ -311,24 +311,26 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'CREATE_ACCOUNT',
+        entityType: 'Account',
+        entityId: newAcc.id,
+        newValues: {
+          accountCode: newAcc.accountCode,
+          name: newAcc.name,
+          accountType: newAcc.accountType,
+          currency: newAcc.currency,
+          openingBalance: newAcc.openingBalance,
+          currentBalance: dOpening.toNumber(),
+        },
+        reason: `إنشاء حساب أو صندوق مالي جديد (${newAcc.name}) برصيد افتتاحي ${dOpening.toNumber().toLocaleString()} ${cur}`,
+        tx,
+      });
+
       // Fetch fresh updated account with confirmed balance
       return await tx.account.findUnique({ where: { id: newAcc.id } });
-    });
-
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'CREATE_ACCOUNT',
-      entityType: 'Account',
-      entityId: result!.id,
-      newValues: {
-        accountCode: result!.accountCode,
-        name: result!.name,
-        accountType: result!.accountType,
-        currency: result!.currency,
-        openingBalance: result!.openingBalance,
-        currentBalance: result!.currentBalance,
-      },
-      reason: `إنشاء حساب أو صندوق مالي جديد (${result!.name}) برصيد افتتاحي ${dOpening.toNumber().toLocaleString()} ${cur}`,
     });
 
     return NextResponse.json({ success: true, data: result }, { status: 201 });

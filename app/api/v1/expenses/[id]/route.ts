@@ -166,18 +166,19 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         },
       });
 
-      return { updatedExpense, reversingLedger, lockedSafe, lockedExp };
-    });
+      // 5. Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'CANCEL_EXPENSE',
+        entityType: 'Expense',
+        entityId: expense.id,
+        oldValues: { status: 'approved', amount: dAmount.toNumber(), currency: cur },
+        newValues: { status: 'cancelled', reversalLedgerId: reversingLedger.id },
+        reason: reason || `إلغاء وعكس مصروف ${expense.expenseNumber}`,
+        tx,
+      });
 
-    // 5. Audit Log
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'CANCEL_EXPENSE',
-      entityType: 'Expense',
-      entityId: expense.id,
-      oldValues: { status: 'approved', amount: dAmount.toNumber(), currency: cur },
-      newValues: { status: 'cancelled', reversalLedgerId: result.reversingLedger.id },
-      reason: reason || `إلغاء وعكس مصروف ${expense.expenseNumber}`,
+      return { updatedExpense, reversingLedger, lockedSafe, lockedExp };
     });
 
     return NextResponse.json({

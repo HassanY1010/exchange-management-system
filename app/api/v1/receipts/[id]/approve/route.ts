@@ -158,6 +158,18 @@ export async function POST(
         });
       }
 
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'APPROVE_BANKAK_RECEIPT',
+        entityType: 'BankakReceipt',
+        entityId: updatedReceipt.id,
+        oldValues: { status: 'verified' },
+        newValues: { status: 'approved', amount: updatedReceipt.amount },
+        reason: `اعتماد إيصال بنكك رقم ${updatedReceipt.transactionId} وقيد اليومية المحاسبي`,
+        tx,
+      });
+
       return {
         receipt: updatedReceipt,
         balanceCheck: balanceCheckResult,
@@ -203,16 +215,6 @@ export async function POST(
       referenceId: receipt.id,
       recipientRole: 'all',
       priority: 'normal',
-    });
-
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'APPROVE_BANKAK_RECEIPT',
-      entityType: 'BankakReceipt',
-      entityId: receipt.id,
-      oldValues: { status: 'verified' },
-      newValues: { status: 'approved', amount: receipt.amount },
-      reason: `اعتماد إيصال بنكك رقم ${receipt.transactionId} وقيد اليومية المحاسبي`,
     });
 
     return NextResponse.json({

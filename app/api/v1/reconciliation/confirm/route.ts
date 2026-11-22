@@ -91,19 +91,21 @@ export async function POST(req: NextRequest) {
         include: { lines: true },
       });
 
-      return { updatedStatement: confirmed, verifiedCount: count };
-    });
+      // Record Audit Log inside atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'CONFIRM_BANK_RECONCILIATION',
+        entityType: 'BankStatement',
+        entityId: statementId,
+        newValues: {
+          confirmedMatchedLines: statement.lines.length,
+          receiptsAutoVerified: count,
+        },
+        reason: `تأكيد واعتماد مطابقة كشف الحساب البنكي رقم ${statement.statementNumber}`,
+        tx,
+      });
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'CONFIRM_BANK_RECONCILIATION',
-      entityType: 'BankStatement',
-      entityId: statementId,
-      newValues: {
-        confirmedMatchedLines: statement.lines.length,
-        receiptsAutoVerified: verifiedCount,
-      },
-      reason: `تأكيد واعتماد مطابقة كشف الحساب البنكي رقم ${statement.statementNumber}`,
+      return { updatedStatement: confirmed, verifiedCount: count };
     });
 
     await createNotification({

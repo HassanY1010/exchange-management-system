@@ -207,6 +207,13 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
 
+    const typeLabel =
+      cleanType === 'customer'
+        ? 'سعر العملاء'
+        : cleanType === 'supplier'
+        ? 'سعر الموردين'
+        : 'سعر السوق المرجعي';
+
     // 4. Atomic Execution & History Preservation with Advisory Lock
     const result = await prisma.$transaction(async (tx) => {
       // Serialize concurrent updates for this exact currency pair and rateType
@@ -248,46 +255,43 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return { createdRate, prevActiveRate };
+      const oldRateNum = prevActiveRate ? Number(prevActiveRate.rate) : null;
+      const newRateNum = Number(createdRate.rate);
+
+      const defaultReason = oldRateNum !== null
+        ? `تحديث ${typeLabel} لزوج ${cleanFrom}/${cleanTo} من ${oldRateNum} إلى ${newRateNum}`
+        : `تثبيت ${typeLabel} أولي لزوج ${cleanFrom}/${cleanTo} بقيمة ${newRateNum}`;
+
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'UPDATE_EXCHANGE_RATE',
+        entityType: 'ExchangeRate',
+        entityId: createdRate.id,
+        oldValues: prevActiveRate ? {
+          id: prevActiveRate.id,
+          rate: oldRateNum,
+          rateType: cleanType,
+          fromCurrency: cleanFrom,
+          toCurrency: cleanTo,
+        } : null,
+        newValues: {
+          id: createdRate.id,
+          rate: newRateNum,
+          rateType: cleanType,
+          fromCurrency: cleanFrom,
+          toCurrency: cleanTo,
+          effectiveFrom: now.toISOString(),
+        },
+        reason: reason?.trim() || defaultReason,
+        tx,
+      });
+
+      return { createdRate, prevActiveRate, oldRateNum, newRateNum };
     });
 
-    const oldRateNum = result.prevActiveRate ? Number(result.prevActiveRate.rate) : null;
-    const newRateNum = Number(result.createdRate.rate);
-
-    // 5. Audit Logging with full traceability
-    const typeLabel =
-      cleanType === 'customer'
-        ? 'سعر العملاء'
-        : cleanType === 'supplier'
-        ? 'سعر الموردين'
-        : 'سعر السوق المرجعي';
-
-    const defaultReason = oldRateNum !== null
-      ? `تحديث ${typeLabel} لزوج ${cleanFrom}/${cleanTo} من ${oldRateNum} إلى ${newRateNum}`
-      : `تثبيت ${typeLabel} أولي لزوج ${cleanFrom}/${cleanTo} بقيمة ${newRateNum}`;
-
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'UPDATE_EXCHANGE_RATE',
-      entityType: 'ExchangeRate',
-      entityId: result.createdRate.id,
-      oldValues: result.prevActiveRate ? {
-        id: result.prevActiveRate.id,
-        rate: oldRateNum,
-        rateType: cleanType,
-        fromCurrency: cleanFrom,
-        toCurrency: cleanTo,
-      } : null,
-      newValues: {
-        id: result.createdRate.id,
-        rate: newRateNum,
-        rateType: cleanType,
-        fromCurrency: cleanFrom,
-        toCurrency: cleanTo,
-        effectiveFrom: now.toISOString(),
-      },
-      reason: reason?.trim() || defaultReason,
-    });
+    const newRateNum = result.newRateNum;
+    const oldRateNum = result.oldRateNum;
 
     return NextResponse.json(
       {

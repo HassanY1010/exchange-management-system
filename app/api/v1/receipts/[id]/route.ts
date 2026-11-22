@@ -135,22 +135,24 @@ export async function PATCH(
         include: { customer: true, customerSession: true },
       });
 
-      return { oldValues: current, updated };
-    });
+      // Record Audit Log inside the same atomic transaction
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'UPDATE_BANKAK_RECEIPT',
+        entityType: 'BankakReceipt',
+        entityId: params.id,
+        oldValues: current,
+        newValues: {
+          transactionId: updated.transactionId,
+          amount: updated.amount,
+          senderName: updated.senderName,
+          reviewedBy: user.name,
+        },
+        reason: `تعديل يدوي لبيانات إيصال بنكك بواسطة ${user.name}`,
+        tx,
+      });
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'UPDATE_BANKAK_RECEIPT',
-      entityType: 'BankakReceipt',
-      entityId: params.id,
-      oldValues: result.oldValues,
-      newValues: {
-        transactionId: result.updated.transactionId,
-        amount: result.updated.amount,
-        senderName: result.updated.senderName,
-        reviewedBy: user.name,
-      },
-      reason: `تعديل يدوي لبيانات إيصال بنكك بواسطة ${user.name}`,
+      return { oldValues: current, updated };
     });
 
     return NextResponse.json({
