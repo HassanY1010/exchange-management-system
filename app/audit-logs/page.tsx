@@ -44,7 +44,7 @@ interface AuditLogItem {
     id: string;
     name: string;
     email?: string;
-    role: string;
+    role?: string | { id?: string; name?: string; description?: string } | null;
   };
 }
 
@@ -102,6 +102,13 @@ const ENTITY_OPTIONS = [
   { value: 'User', label: 'المستخدمون (User)' },
   { value: 'SystemSettings', label: 'إعدادات النظام (SystemSettings)' },
 ];
+
+const formatRole = (role: any): string => {
+  if (!role) return '—';
+  if (typeof role === 'string') return role;
+  if (typeof role === 'object') return role.name || role.id || '—';
+  return String(role);
+};
 
 export default function AuditLogsPage() {
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
@@ -642,7 +649,7 @@ export default function AuditLogsPage() {
                         </td>
                         <td className="p-3">
                           <div className="font-bold text-slate-900">{log.user?.name || log.userId || 'النظام'}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">{log.user?.role || '—'}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">{formatRole(log.user?.role)}</div>
                         </td>
                         <td className="p-3 max-w-xs">
                           <p className="truncate text-slate-600" title={log.reason || '—'}>
@@ -745,6 +752,9 @@ export default function AuditLogsPage() {
                 <div>
                   <span className="text-slate-400 block text-[10px]">المستخدم:</span>
                   <span className="font-bold text-slate-200">{selectedLog.user?.name || selectedLog.userId || 'النظام'}</span>
+                  {selectedLog.user?.role && (
+                    <span className="text-[10px] text-slate-400 block font-mono">({formatRole(selectedLog.user.role)})</span>
+                  )}
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">التاريخ (توقيت القاهرة):</span>

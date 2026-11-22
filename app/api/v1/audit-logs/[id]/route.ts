@@ -45,10 +45,22 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   let enrichedUser = null;
   if (log.userId) {
-    enrichedUser = await prisma.user.findUnique({
+    const u = await prisma.user.findUnique({
       where: { id: log.userId },
       select: { id: true, name: true, email: true, role: true },
     });
+    if (u) {
+      const roleName =
+        typeof u.role === 'object' && u.role !== null
+          ? (u.role as any).name || (u.role as any).id || 'unknown'
+          : (u.role || 'unknown');
+      enrichedUser = {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: roleName,
+      };
+    }
   }
 
   return NextResponse.json({

@@ -126,6 +126,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Helper to safely extract role name as string
+    const getRoleName = (role: any): string => {
+      if (!role) return 'unknown';
+      if (typeof role === 'string') return role;
+      if (typeof role === 'object' && role !== null) return role.name || role.id || 'unknown';
+      return String(role);
+    };
+
     // Resolve user names
     const uniqueUserIds = Array.from(new Set(exportLogs.map((l) => l.userId).filter(Boolean))) as string[];
     const users = await prisma.user.findMany({
@@ -139,7 +147,7 @@ export async function GET(req: NextRequest) {
       return {
         ...log,
         userName: u?.name || log.userId || 'النظام / غير محدد',
-        userRole: u?.role || '—',
+        userRole: u ? getRoleName(u.role) : '—',
         cairoTime: new Intl.DateTimeFormat('ar-EG', {
           timeZone: 'Africa/Cairo',
           dateStyle: 'medium',
@@ -215,6 +223,13 @@ export async function GET(req: NextRequest) {
   }
 
   // Enrich logs with User information
+  const getRoleName = (role: any): string => {
+    if (!role) return 'unknown';
+    if (typeof role === 'string') return role;
+    if (typeof role === 'object' && role !== null) return role.name || role.id || 'unknown';
+    return String(role);
+  };
+
   const uniqueUserIds = Array.from(new Set(logs.map((l) => l.userId).filter(Boolean))) as string[];
   const users = await prisma.user.findMany({
     where: { id: { in: uniqueUserIds } },
@@ -227,7 +242,7 @@ export async function GET(req: NextRequest) {
     return {
       ...log,
       user: u
-        ? { id: u.id, name: u.name, email: u.email, role: u.role }
+        ? { id: u.id, name: u.name, email: u.email, role: getRoleName(u.role) }
         : log.userId
         ? { id: log.userId, name: log.userId, role: 'unknown' }
         : { id: 'system', name: 'النظام الآلي', role: 'system' },
