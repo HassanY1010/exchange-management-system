@@ -283,22 +283,41 @@ model Supplier {
 }
 
 model SupplierTransaction {
-  id                String    @id @default(uuid())
-  transactionNumber String    @unique
-  supplierId        String
-  supplier          Supplier  @relation(fields: [supplierId], references: [id])
-  transactionType   String    // BUY_SDG_PAY_EGP, SELL_SDG_GET_EGP, BUY_EGP_PAY_SDG, SELL_EGP_GET_SDG, PARTIAL_SETTLEMENT, DEBT_PAYMENT
-  fromCurrency      String
-  toCurrency        String
-  fromAmount        Decimal   @db.Decimal(20, 4)
-  toAmount          Decimal   @db.Decimal(20, 4)
-  exchangeRate      Decimal   @db.Decimal(20, 4)
-  feeAmount         Decimal   @default(0) @db.Decimal(20, 4)
-  status            String    @default("completed") // pending, partially_settled, completed, reversed
-  createdBy         String
-  approvedBy        String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                   String    @id @default(uuid())
+  transactionNumber    String    @unique
+  supplierId           String
+  supplier             Supplier  @relation(fields: [supplierId], references: [id])
+  transactionType      String    // BUY_SDG_PAY_EGP, SELL_SDG_GET_EGP, BUY_EGP_PAY_SDG, SELL_EGP_GET_SDG, PARTIAL_SETTLEMENT, DEBT_PAYMENT
+  fromCurrency         String
+  toCurrency           String
+  fromAmount           Decimal   @db.Decimal(20, 4)
+  toAmount             Decimal   @db.Decimal(20, 4)
+  exchangeRate         Decimal   @db.Decimal(20, 4)
+  feeAmount            Decimal   @default(0) @db.Decimal(20, 4)
+  cogsAmount           Decimal?  @db.Decimal(20, 4)
+  profitAmount         Decimal?  @db.Decimal(20, 4)
+  wacRate              Decimal?  @db.Decimal(20, 8)
+  sourceAccountId      String?
+  destinationAccountId String?
+  notes                String?
+  status               String    @default("completed") // pending, partially_settled, completed, reversed
+  createdBy            String
+  approvedBy           String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+model CurrencyInventory {
+  id                  String   @id @default(uuid())
+  currency            String   @unique // SDG, USD, SAR
+  baseCurrency        String   @default("EGP")
+  currentQuantity     Decimal  @default(0) @db.Decimal(20, 4)
+  totalCostBase       Decimal  @default(0) @db.Decimal(20, 4)
+  weightedAverageCost Decimal  @default(0) @db.Decimal(20, 8) // Cost in base currency (EGP) per unit of currency
+  lastPurchaseRate    Decimal? @db.Decimal(20, 4)
+  totalRealizedProfit Decimal  @default(0) @db.Decimal(20, 4)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model ExpenseCategory {
