@@ -13,48 +13,94 @@ export interface TokenPayload {
   name: string;
   role: string;
   jti?: string;
+  exp?: number;
+  iat?: number;
 }
 
-// In-memory token revocation cache
+// In-memory token revocation cache (process-local fallback)
 const revokedTokensMemory = new Map<string, number>();
 
 /**
- * Revoke a token (used during logout or security invalidation)
+ * Revoke a token (used during logout or security invalidation).
+ * Persists to shared Redis with TTL matching the token's remaining lifetime.
  */
-export async function revokeToken(token: string, ttlSeconds: number = 7 * 24 * 3600): Promise<void> {
+export async function revokeToken(token: string, customTtlSeconds?: number): Promise<void> {
   if (!token) return;
-  const expiresAtMs = Date.now() + ttlSeconds * 1000;
-  revokedTokensMemory.set(token, expiresAtMs);
+  let ttl = customTtlSeconds;
+  let jti: string | undefined;
 
+  try {
+    const decoded = jwt.decode(token) as any;
+    if (decoded) {
+      if (decoded.jti) jti = decoded.jti;
+      if (!ttl && decoded.exp) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        ttl = Math.max(60, decoded.exp - nowSec);
+      }
+    }
+  } catch {}
+
+  if (!ttl) ttl = 7 * 24 * 3600;
+
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const expiresAtMs = Date.now() + ttl * 1000;
+
+  // 1. Process-local cache
+  revokedTokensMemory.set(tokenHash, expiresAtMs);
+  if (jti) revokedTokensMemory.set(`jti:${jti}`, expiresAtMs);
+
+  // 2. Shared Redis (shared across all cluster instances and persistent across restarts)
   if (redis) {
     try {
-      await redis.set(`revoked_jwt:${token}`, '1', 'EX', ttlSeconds);
-    } catch {}
+      await redis.set(`revoked_token:${tokenHash}`, '1', 'EX', ttl);
+      if (jti) {
+        await redis.set(`revoked_jti:${jti}`, '1', 'EX', ttl);
+      }
+    } catch (err) {
+      console.warn('Redis unavailable for revokeToken, falling back to local memory:', err);
+    }
   }
 }
 
 /**
- * Check if a token has been revoked
+ * Check if a token has been revoked across Redis or local memory.
  */
-export async function isTokenRevoked(token: string): Promise<boolean> {
+export async function isTokenRevoked(token: string, jti?: string): Promise<boolean> {
   if (!token) return true;
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const now = Date.now();
 
-  // 1. Check in-memory
-  const exp = revokedTokensMemory.get(token);
+  // 1. Check process-local memory
+  const exp = revokedTokensMemory.get(tokenHash) || (jti ? revokedTokensMemory.get(`jti:${jti}`) : undefined);
   if (exp) {
-    if (exp > Date.now()) return true;
-    revokedTokensMemory.delete(token);
+    if (exp > now) return true;
+    revokedTokensMemory.delete(tokenHash);
+    if (jti) revokedTokensMemory.delete(`jti:${jti}`);
   }
 
-  // 2. Check Redis
+  // 2. Check shared Redis (cluster instances synchronization & restart persistence)
   if (redis) {
     try {
-      const exists = await redis.get(`revoked_jwt:${token}`);
-      if (exists) return true;
-    } catch {}
+      const keysToCheck = [`revoked_token:${tokenHash}`];
+      if (jti) keysToCheck.push(`revoked_jti:${jti}`);
+
+      const results = await redis.mget(...keysToCheck);
+      if (results.some((val) => val !== null)) {
+        return true;
+      }
+    } catch (err) {
+      console.warn('Redis check failed in isTokenRevoked, falling back to local memory:', err);
+    }
   }
 
   return false;
+}
+
+/**
+ * Cleans up process-local memory blacklist
+ */
+export function clearMemoryBlacklist(): void {
+  revokedTokensMemory.clear();
 }
 
 export function generateToken(payload: TokenPayload): string {
@@ -86,12 +132,16 @@ export async function getUserFromRequest(req: NextRequest): Promise<TokenPayload
 
   if (!token) return null;
 
-  // Check if token was explicitly revoked
-  if (await isTokenRevoked(token)) {
+  // 1. Verify token cryptographic signature and expiration first
+  const payload = verifyToken(token);
+  if (!payload) return null;
+
+  // 2. Check if token or jti has been revoked in shared Redis or local blacklist
+  if (await isTokenRevoked(token, payload.jti)) {
     return null;
   }
 
-  return verifyToken(token);
+  return payload;
 }
 
 export function authError(message: string = 'غير مصرح لك بالوصول (يرجى تسجيل الدخول)', status = 401) {

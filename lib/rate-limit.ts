@@ -163,3 +163,11 @@ export async function resetRateLimit(key: string): Promise<void> {
     } catch {}
   }
 }
+
+/**
+ * Clears local process memory (used for restart simulation in tests)
+ */
+export function clearMemoryRateLimits(): void {
+  memoryAttempts.clear();
+}
+
