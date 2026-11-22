@@ -270,7 +270,6 @@ async function main() {
     { key: 'fiscal_year_start_month', value: '1', description: 'شهر بداية السنة المالية' },
     { key: 'daily_closing_auto_lock', value: 'true', description: 'منع تعديل العمليات بعد الإغلاق اليومي' },
     { key: 'ocr_min_confidence', value: '70', description: 'الحد الأدنى لدرجة الثقة لاعتماد OCR التلقائي' },
-    { key: 'allow_negative_inventory', value: 'false', description: 'حظر الأرصدة السالبة في الخزائن' },
   ];
 
   for (const s of settings) {

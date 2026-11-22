@@ -127,15 +127,6 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     type: 'number',
     defaultValue: '70',
   },
-  {
-    key: 'allow_negative_inventory',
-    category: 'operations',
-    labelAr: 'السماح بالأرصدة السالبة في الخزائن',
-    descriptionAr: 'السماح بصرف مبالغ من الخزينة حتى لو تجاوز المبلغ الرصيد الفعلي المتوفر (يُوصى بإيقافه للحفاظ على الانضباط الرقابي)',
-    type: 'boolean',
-    defaultValue: 'false',
-    isSensitive: true,
-  },
 ];
 
 export const DEFAULT_SETTINGS_MAP: Record<string, string> = SETTING_DEFINITIONS.reduce(
@@ -288,7 +279,7 @@ export async function validateSettingsUpdates(
       const removedCurrencies = oldCurrencies.filter((c) => !newCurrencies.includes(c));
 
       if (removedCurrencies.length > 0) {
-        // Check if any removed currency exists in accounts or ledger lines
+        // Check if any removed currency exists in accounts, ledger lines, or exchange rates
         const conflictingAccount = await prisma.account.findFirst({
           where: { currency: { in: removedCurrencies } },
           select: { currency: true, name: true, accountCode: true },
@@ -296,15 +287,28 @@ export async function validateSettingsUpdates(
 
         if (conflictingAccount) {
           errors[key] = `لا يمكن حذف العملة (${conflictingAccount.currency}) لوجود حساب مالي نشط مرتبط بها (${conflictingAccount.accountCode} - ${conflictingAccount.name})`;
-        }
+        } else {
+          const conflictingLedger = await prisma.ledgerLine.findFirst({
+            where: { currency: { in: removedCurrencies } },
+            select: { currency: true },
+          });
 
-        const conflictingLedger = await prisma.ledgerLine.findFirst({
-          where: { currency: { in: removedCurrencies } },
-          select: { currency: true },
-        });
-
-        if (conflictingLedger) {
-          errors[key] = `لا يمكن حذف العملة (${conflictingLedger.currency}) لوجود قيود تاريخية مسجلة بها في دفتر الأستاذ العام`;
+          if (conflictingLedger) {
+            errors[key] = `لا يمكن حذف العملة (${conflictingLedger.currency}) لوجود قيود تاريخية مسجلة بها في دفتر الأستاذ العام`;
+          } else {
+            const conflictingRate = await prisma.exchangeRate.findFirst({
+              where: {
+                OR: [
+                  { fromCurrency: { in: removedCurrencies } },
+                  { toCurrency: { in: removedCurrencies } },
+                ],
+              },
+              select: { fromCurrency: true, toCurrency: true },
+            });
+            if (conflictingRate) {
+              errors[key] = `لا يمكن حذف العملة لوجود أسعار صرف نشطة مسجلة لزوج (${conflictingRate.fromCurrency}/${conflictingRate.toCurrency})`;
+            }
+          }
         }
       }
     }
@@ -334,7 +338,7 @@ export async function validateSettingsUpdates(
     }
 
     // 9. Boolean flags validation
-    if (key === 'daily_closing_auto_lock' || key === 'allow_negative_inventory') {
+    if (key === 'daily_closing_auto_lock') {
       if (val !== 'true' && val !== 'false') {
         errors[key] = `القيمة يجب أن تكون true أو false`;
       }
