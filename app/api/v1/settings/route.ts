@@ -1,51 +1,76 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { logAuditEvent } from '@/lib/audit';
+import {
+  getSystemSettings,
+  updateSystemSettings,
+  SETTING_DEFINITIONS,
+  validateSettingsUpdates,
+} from '@/lib/settings/settings-service';
 
 export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
-  const settings = await prisma.setting.findMany();
-  const settingsMap: Record<string, string> = {};
-  for (const s of settings) {
-    settingsMap[s.key] = s.value;
+  const ALLOWED_VIEW_ROLES = ['admin', 'general_manager', 'accountant', 'auditor'];
+  if (!ALLOWED_VIEW_ROLES.includes(user.role)) {
+    return NextResponse.json(
+      { success: false, error: 'غير مصرح لك بالاطلاع على إعدادات وتهيئة النظام' },
+      { status: 403 }
+    );
   }
 
-  return NextResponse.json({ success: true, data: settingsMap, list: settings });
+  const settingsMap = await getSystemSettings();
+  const canEdit = ['admin', 'general_manager'].includes(user.role);
+
+  return NextResponse.json({
+    success: true,
+    data: settingsMap,
+    definitions: SETTING_DEFINITIONS,
+    canEdit,
+  });
 }
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
-  if (user.role !== 'admin') {
-    return NextResponse.json({ error: 'صلاحية تعديل الإعدادات مخصصة لمدير النظام فقط' }, { status: 403 });
+  if (!['admin', 'general_manager'].includes(user.role)) {
+    return NextResponse.json(
+      { success: false, error: 'صلاحية تعديل إعدادات النظام مقتصرة على مدير النظام أو المدير العام فقط' },
+      { status: 403 }
+    );
   }
 
   try {
     const body = await req.json();
-    for (const [key, value] of Object.entries(body)) {
-      if (typeof value === 'string') {
-        await prisma.setting.upsert({
-          where: { key },
-          update: { value },
-          create: { key, value },
-        });
-      }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json(
+        { success: false, error: 'صيغة البيانات المرسلة غير صالحة' },
+        { status: 400 }
+      );
     }
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'UPDATE_SETTINGS',
-      entityType: 'Setting',
-      newValues: body,
-      reason: 'تحديث إعدادات النظام',
-    });
+    const ipAddress = req.headers.get('x-forwarded-for') || '127.0.0.1';
 
-    return NextResponse.json({ success: true, message: 'تم حفظ الإعدادات بنجاح' });
+    const result = await updateSystemSettings(
+      body,
+      {
+        userId: user.userId,
+        name: user.name,
+        role: user.role,
+      },
+      ipAddress
+    );
+
+    return NextResponse.json(result);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'خطأ في حفظ الإعدادات' }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: error.message || 'حدث خطأ أثناء حفظ الإعدادات' },
+      { status: 400 }
+    );
   }
+}
+
+export async function PUT(req: NextRequest) {
+  return POST(req);
 }

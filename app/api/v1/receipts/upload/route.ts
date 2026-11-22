@@ -6,6 +6,7 @@ import { processReceiptImageWithOcr } from '@/lib/ocr/image-ocr';
 import { uploadReceiptImage } from '@/lib/storage/supabase-storage';
 import { logAuditEvent } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications/notification-service';
+import { getSystemSetting } from '@/lib/settings/settings-service';
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -310,7 +311,8 @@ export async function POST(req: NextRequest) {
           priority: 'normal',
         });
 
-        if (parsed.ocrConfidence < 70) {
+        const minOcrConfidence = await getSystemSetting<number>('ocr_min_confidence', 70);
+        if (parsed.ocrConfidence < minOcrConfidence) {
           await createNotification({
             type: 'pending_review',
             title: 'دقة قراءة منخفضة للإيصال (OCR)',

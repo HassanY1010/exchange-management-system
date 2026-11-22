@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
+import { getSystemSettings } from '@/lib/settings/settings-service';
 
 export async function GET(
   req: NextRequest,
@@ -71,14 +72,18 @@ export async function GET(
     }
   }
 
-  const companySetting = await prisma.setting.findUnique({
-    where: { key: 'company_name' },
-  }).catch(() => null);
+  const settings = await getSystemSettings();
 
   return NextResponse.json({
     success: true,
     statement: {
-      companyName: companySetting?.value || 'شركة النجم لخدمات الصرافة والتحويلات المالية',
+      companyName: settings.company_name || 'شركة النجم لخدمات الصرافة والتحويلات المالية',
+      company: {
+        name: settings.company_name || 'شركة النجم لخدمات الصرافة والتحويلات المالية',
+        phone: settings.company_phone || '+20 100 000 0000',
+        address: settings.company_address || 'القاهرة، جمهورية مصر العربية',
+        taxNumber: settings.company_tax_number || '100-200-300',
+      },
       customer: {
         id: customer.id,
         code: customer.customerCode,

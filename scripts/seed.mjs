@@ -260,11 +260,17 @@ async function main() {
   // 10. System Settings
   const settings = [
     { key: 'company_name', value: 'شركة النجم لخدمات الصرافة والتحويلات المالية', description: 'اسم المؤسسة' },
+    { key: 'company_phone', value: '+20 100 000 0000', description: 'هاتف التواصل الرئيسي' },
+    { key: 'company_address', value: 'القاهرة، جمهورية مصر العربية', description: 'العنوان والمقر الرئيسي' },
+    { key: 'company_tax_number', value: '100-200-300', description: 'الرقم الضريبي والسجل التجاري' },
     { key: 'primary_currency', value: 'EGP', description: 'العملة المحاسبية المرجعية' },
     { key: 'supported_currencies', value: 'EGP,SDG,USD,SAR,AED', description: 'العملات المدعومة' },
-    { key: 'timezone', value: 'Africa/Cairo', description: 'المنطقة الزمنية المعتمدة' },
+    { key: 'decimal_places', value: '2', description: 'عدد الخانات العشرية المعروضة' },
+    { key: 'timezone', value: 'Africa/Cairo', description: 'المنطقة الزمنية المعتمدة (توقيت القاهرة شتاءً UTC+2 وصيفاً UTC+3)' },
+    { key: 'fiscal_year_start_month', value: '1', description: 'شهر بداية السنة المالية' },
     { key: 'daily_closing_auto_lock', value: 'true', description: 'منع تعديل العمليات بعد الإغلاق اليومي' },
     { key: 'ocr_min_confidence', value: '70', description: 'الحد الأدنى لدرجة الثقة لاعتماد OCR التلقائي' },
+    { key: 'allow_negative_inventory', value: 'false', description: 'حظر الأرصدة السالبة في الخزائن' },
   ];
 
   for (const s of settings) {

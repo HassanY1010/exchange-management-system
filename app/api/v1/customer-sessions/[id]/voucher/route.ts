@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
+import { getSystemSettings } from '@/lib/settings/settings-service';
 
 export async function GET(
   req: NextRequest,
@@ -25,8 +26,18 @@ export async function GET(
     return NextResponse.json({ error: 'لم يتم العثور على سند صرف نقدية لهذه الجلسة' }, { status: 404 });
   }
 
+  const settings = await getSystemSettings();
+
   return NextResponse.json({
     success: true,
-    data: voucher,
+    data: {
+      ...voucher,
+      company: {
+        name: settings.company_name || 'شركة النجم لخدمات الصرافة والتحويلات المالية',
+        phone: settings.company_phone || '+20 100 000 0000',
+        address: settings.company_address || 'القاهرة، جمهورية مصر العربية',
+        taxNumber: settings.company_tax_number || '100-200-300',
+      },
+    },
   });
 }
