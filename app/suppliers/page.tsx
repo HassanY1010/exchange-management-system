@@ -104,6 +104,15 @@ export default function SuppliersPage() {
 
   useEffect(() => {
     fetchSuppliers();
+    fetch('/api/v1/exchange-rates')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data?.length > 0) {
+          const suppRate = data.data.find((r: any) => r.rateType === 'supplier');
+          if (suppRate && suppRate.rate > 0) setRate(Number(suppRate.rate));
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // SDG Inventory summary
