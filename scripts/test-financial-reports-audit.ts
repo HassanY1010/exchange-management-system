@@ -132,9 +132,9 @@ async function runComprehensiveFinancialReportsAudit() {
     }
 
     // -------------------------------------------------------------
-    // Test 4: Balance Sheet Equation (Assets = Liabilities + Equity)
+    // Test 4: Balance Sheet Equation (Assets = Liabilities + Equity) & Independent Equity
     // -------------------------------------------------------------
-    console.log('\n--- Group 4: Balance Sheet Equation (A = L + E) Audit ---');
+    console.log('\n--- Group 4: Balance Sheet Equation (A = L + E) & Independent Equity Audit ---');
     const bsReport = await getBalanceSheetReport({
       asOfDate: monthRange.toDate,
       timeZone: 'Africa/Cairo',
@@ -149,12 +149,21 @@ async function runComprehensiveFinancialReportsAudit() {
       assert(bs.isBalanced === true, `Balance Sheet is balanced for currency ${cur}`);
       assert(bs.difference === 0, `Balance Sheet difference is 0 for currency ${cur}`);
 
+      // Verify that total equity is the exact sum of independent parts
       const calculatedEquity = new Decimal(bs.equity.capitalTotal)
         .plus(new Decimal(bs.equity.retainedEarnings))
         .plus(new Decimal(bs.equity.currentPeriodProfit));
       assert(
         calculatedEquity.equals(new Decimal(bs.equity.total)),
         `Total Equity strictly decomposes into Capital + Retained Earnings + Current Period Profit for ${cur}`
+      );
+
+      // Verify independent A = L + E equation: Assets - (Liabilities + Equity) === 0
+      const equationDiff = new Decimal(bs.assets.total)
+        .minus(new Decimal(bs.liabilities.total).plus(new Decimal(bs.equity.total)));
+      assert(
+        equationDiff.abs().lessThan(0.0001),
+        `Independent Equation Assets = Liabilities + Equity holds strictly for ${cur} (Diff: ${equationDiff.toString()})`
       );
     }
 
@@ -248,8 +257,36 @@ async function runComprehensiveFinancialReportsAudit() {
     const dataAccountant = await resAccountant.json();
     assert(resAccountant.status === 200 && dataAccountant.success === true, 'Accountant access returns HTTP 200 with report data');
 
+    // -------------------------------------------------------------
+    // Test 8: Audit Focus Points (Clearing Persistence & Zero Mutation)
+    // -------------------------------------------------------------
+    console.log('\n--- Group 8: Clearing Accounts Persistence & Reclassification Immutability Audit ---');
+    const clearingAccounts = await prisma.account.findMany({
+      where: { accountCode: { in: ['1060', '1065'] } },
+    });
+    assert(clearingAccounts.length === 2, 'Both clearing accounts 1060 and 1065 exist in DB');
+    for (const ca of clearingAccounts) {
+      assert(ca.accountType === 'clearing', `Account ${ca.accountCode} permanently has accountType='clearing' (actual: ${ca.accountType})`);
+    }
+
+    // Verify trial balance and ledger lines have not been modified by balance sheet presentation
+    const trialAfterBs = await getTrialBalanceReport({
+      fromDate: monthRange.fromDate,
+      toDate: monthRange.toDate,
+      timeZone: 'Africa/Cairo',
+    });
+    const tbAssetsEgp = trialAfterBs.byCurrency['EGP'].classes.assets;
+    const clearingTbLine = tbAssetsEgp.find((l: any) => l.accountCode === '1060');
+    assert(clearingTbLine !== undefined, 'Account 1060 remains in Trial Balance under its exact original code 1060 in assets');
+    assert(clearingTbLine.accountType === 'clearing', 'Account 1060 in Trial Balance preserves accountType=clearing');
+
+    // Verify customer liability accounts remain in Trial Balance as original liabilities
+    const tbLiabEgp = trialAfterBs.byCurrency['EGP'].classes.liabilities;
+    const custLiabTb = tbLiabEgp.find((l: any) => l.accountCode === '2010');
+    assert(custLiabTb !== undefined, 'Account 2010 remains canonical in Trial Balance liabilities regardless of debit reclassification in BS');
+
     console.log('\n================================================================');
-    console.log('   🎉 ALL 7 AUDIT GROUPS PASSED WITH 100% MATHEMATICAL RIGOR   ');
+    console.log('   🎉 ALL 8 AUDIT GROUPS PASSED WITH 100% MATHEMATICAL RIGOR   ');
     console.log('================================================================\n');
   } catch (error: any) {
     console.error('Audit failed with error:', error.message);

@@ -169,8 +169,8 @@ async function main() {
     { code: '1030', name: 'حساب بنكك الرئيسي (Bankak Account - BOK)', type: 'bankak', currency: 'SDG', balance: 10000000 },
     { code: '1040', name: 'الحساب البنكي التجاري المصري (EGP Bank Account)', type: 'bank', currency: 'EGP', balance: 500000 },
     { code: '1050', name: 'عهدة الموظف محمد (Custody Mohammed)', type: 'employee_custody', currency: 'EGP', balance: 500000 },
-    { code: '1060', name: 'حساب وسيط تسوية وتبادل العملات - مصري (Currency Clearing EGP)', type: 'cash_safe', currency: 'EGP', balance: 0 },
-    { code: '1065', name: 'حساب وسيط تسوية وتبادل العملات - سوداني (Currency Clearing SDG)', type: 'cash_safe', currency: 'SDG', balance: 0 },
+    { code: '1060', name: 'حساب وسيط تسوية وتبادل العملات - مصري (Currency Clearing EGP)', type: 'clearing', currency: 'EGP', balance: 0 },
+    { code: '1065', name: 'حساب وسيط تسوية وتبادل العملات - سوداني (Currency Clearing SDG)', type: 'clearing', currency: 'SDG', balance: 0 },
     { code: '2010', name: 'التزامات وحسابات العملاء المفتوحة - مصري (Customer Liabilities EGP)', type: 'customer_liability', currency: 'EGP', balance: 0 },
     { code: '2015', name: 'التزامات وحسابات العملاء المفتوحة - سوداني (Customer Liabilities SDG)', type: 'customer_liability', currency: 'SDG', balance: 0 },
     { code: '2020', name: 'التزامات وحسابات الموردين (Supplier Liabilities)', type: 'supplier_liability', currency: 'SDG', balance: 0 },
@@ -182,7 +182,7 @@ async function main() {
   for (const acc of defaultAccounts) {
     await prisma.account.upsert({
       where: { accountCode: acc.code },
-      update: { currentBalance: acc.balance },
+      update: { currentBalance: acc.balance, accountType: acc.type },
       create: {
         accountCode: acc.code,
         name: acc.name,

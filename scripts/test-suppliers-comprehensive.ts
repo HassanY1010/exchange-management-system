@@ -67,7 +67,7 @@ async function runSupplierComprehensiveTests() {
       data: {
         accountCode: '1060',
         name: 'حساب وسيط تسوية العملات (EGP)',
-        accountType: 'cash_safe',
+        accountType: 'clearing',
         currency: 'EGP',
         currentBalance: 0,
       },
@@ -80,7 +80,7 @@ async function runSupplierComprehensiveTests() {
       data: {
         accountCode: '1065',
         name: 'حساب وسيط تسوية العملات (SDG)',
-        accountType: 'cash_safe',
+        accountType: 'clearing',
         currency: 'SDG',
         currentBalance: 0,
       },
