@@ -18,16 +18,22 @@ export async function GET(req: NextRequest) {
     if (toDate) expenseWhere.expenseDate.lte = toDate;
   }
 
-  // 1. Real Operating Expenses from Database
+  // 1. Real Operating Expenses from Database (strictly approved, currency-isolated)
   const expenses = await prisma.expense.findMany({
     where: expenseWhere,
     include: { category: true },
   });
 
-  const totalOperatingExpenses = expenses.reduce(
+  const egpExpenses = expenses.filter((e) => e.currency === 'EGP');
+  const totalOperatingExpenses = egpExpenses.reduce(
     (sum, e) => sum.plus(new Decimal(e.amount.toString())),
     new Decimal(0)
   );
+
+  const expensesByCurrency: Record<string, number> = {};
+  for (const exp of expenses) {
+    expensesByCurrency[exp.currency] = (expensesByCurrency[exp.currency] || 0) + Number(exp.amount);
+  }
 
   // 2. Real Supplier Trading Profits from Database
   const supplierTxns = await prisma.supplierTransaction.findMany({
@@ -101,9 +107,11 @@ export async function GET(req: NextRequest) {
       },
       expenses: {
         totalOperatingExpenses: totalOperatingExpenses.toDecimalPlaces(2).toNumber(),
+        expensesByCurrency,
         byCategory: expenses.map((e) => ({
           category: e.category.name,
           amount: new Decimal(e.amount.toString()).toNumber(),
+          currency: e.currency,
           date: e.expenseDate,
         })),
       },

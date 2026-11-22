@@ -130,11 +130,18 @@ export async function GET(req: NextRequest) {
   const suspiciousReceiptsCount = receiptsToday.filter((r) => r.isSuspicious === true || r.status === 'suspicious').length;
   const rejectedReceiptsCount = receiptsToday.filter((r) => r.status === 'rejected' || r.status === 'failed').length;
 
-  // 4. Expenses today
+  // 4. Expenses today (strictly approved, isolated per currency)
   const expensesToday = await prisma.expense.findMany({
-    where: { expenseDate: todayStr },
+    where: { expenseDate: todayStr, status: 'approved' },
   });
-  const totalExpensesToday = expensesToday.reduce((sum, e) => sum + Number(e.amount), 0);
+  const totalExpensesToday = expensesToday
+    .filter((e) => e.currency === 'EGP')
+    .reduce((sum, e) => sum + Number(e.amount), 0);
+
+  const expensesTodayByCurrency: Record<string, number> = {};
+  for (const exp of expensesToday) {
+    expensesTodayByCurrency[exp.currency] = (expensesTodayByCurrency[exp.currency] || 0) + Number(exp.amount);
+  }
 
   // 5. Debts
   const debts = await prisma.debt.findMany({
@@ -278,6 +285,7 @@ export async function GET(req: NextRequest) {
     capitalBalance: isFinanceRole ? capitalBalance : 0,
     capitalByCurrency: isFinanceRole ? capitalByCurrency : {},
     totalExpensesToday: isFinanceRole ? totalExpensesToday : 0,
+    expensesTodayByCurrency: isFinanceRole ? expensesTodayByCurrency : {},
     totalCustomerDebts: isFinanceRole ? totalCustomerDebts : 0,
     totalSupplierDebts: isFinanceRole ? totalSupplierDebts : 0,
   };
