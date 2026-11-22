@@ -29,6 +29,21 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if (typeof window !== 'undefined') {
+                window.addEventListener('error', function(event) {
+                  if (event && event.message && (event.message.indexOf('M_ID') !== -1 || event.message.indexOf('m_id') !== -1)) {
+                    event.stopImmediatePropagation();
+                    event.preventDefault();
+                    return true;
+                  }
+                }, true);
+              }
+            `,
+          }}
+        />
       </head>
       <body className="font-sans antialiased bg-slate-50 text-slate-900 min-h-screen">
         {children}

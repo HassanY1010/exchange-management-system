@@ -37,22 +37,74 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
       })
       .catch(() => router.push('/login'));
 
-    // Polling function for real-time notifications
+    // Polling function for real-time notifications with online & visibility safeguards
+    let isFetching = false;
+    let abortController: AbortController | null = null;
+
     const fetchNotifications = () => {
-      fetch('/api/v1/notifications')
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success) setNotifications(data.data || []);
+      // 1. Guard against offline polling (prevents ERR_INTERNET_DISCONNECTED in console)
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return;
+      }
+      // 2. Pause polling when page/screen is hidden
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+      // 3. Avoid overlapping requests
+      if (isFetching) return;
+
+      isFetching = true;
+      if (abortController) {
+        try {
+          abortController.abort();
+        } catch (e) {}
+      }
+      abortController = new AbortController();
+
+      fetch('/api/v1/notifications', {
+        signal: abortController.signal,
+        headers: { 'Cache-Control': 'no-cache' },
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
         })
-        .catch(() => {});
+        .then((data) => {
+          if (data?.success && Array.isArray(data.data)) {
+            setNotifications(data.data);
+          }
+        })
+        .catch(() => {
+          // Gracefully swallow network disconnects and aborts
+        })
+        .finally(() => {
+          isFetching = false;
+        });
     };
 
     fetchNotifications();
     const notifInterval = setInterval(fetchNotifications, 10000); // 10s polling
 
+    const handleOnline = () => fetchNotifications();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications();
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       clearInterval(interval);
       clearInterval(notifInterval);
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (abortController) {
+        try {
+          abortController.abort();
+        } catch (e) {}
+      }
     };
   }, [router]);
 
@@ -68,32 +120,32 @@ export function Header({ onOpenMobileMenu }: HeaderProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      setNotifications((prev) => prev.map((n) => (n ? { ...n, isRead: true } : n)));
     } catch (e) {}
   };
 
   const handleNotificationClick = async (notif: any) => {
-    if (!notif.isRead) {
+    if (!notif?.isRead) {
       fetch('/api/v1/notifications', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: notif.id }),
+        body: JSON.stringify({ id: notif?.id }),
       }).catch(() => {});
       setNotifications((prev) =>
-        prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
+        prev.map((n) => (n?.id === notif?.id ? { ...n, isRead: true } : n))
       );
     }
     setShowNotifications(false);
-    if (notif.referenceType === 'BankakReceipt') {
+    if (notif?.referenceType === 'BankakReceipt') {
       router.push('/receipts');
-    } else if (notif.referenceType === 'CustomerSession' || notif.referenceType === 'CashPayoutVoucher') {
+    } else if (notif?.referenceType === 'CustomerSession' || notif?.referenceType === 'CashPayoutVoucher') {
       router.push('/customer-sessions');
-    } else if (notif.referenceType === 'BankStatement') {
+    } else if (notif?.referenceType === 'BankStatement') {
       router.push('/reconciliation');
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const unreadCount = notifications.filter((n) => n && !n.isRead).length;
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 px-3 sm:px-6 flex items-center justify-between sticky top-0 z-30 shadow-sm shrink-0">

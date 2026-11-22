@@ -139,6 +139,19 @@ async function runOcrPerformanceTests() {
     },
   });
 
+  // Clean up prior test runs for idempotent test execution
+  await prisma.ledgerEntry.deleteMany({
+    where: { referenceType: 'BankakReceipt' },
+  }).catch(() => {});
+  await prisma.bankakReceipt.deleteMany({
+    where: {
+      OR: [
+        { transactionId: '987654321' },
+        { customerId: testCustomer.id },
+      ],
+    },
+  }).catch(() => {});
+
   const uploadReq = new NextRequest('http://localhost:3000/api/v1/receipts/upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },

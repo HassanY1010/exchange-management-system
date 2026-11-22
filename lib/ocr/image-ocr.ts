@@ -47,12 +47,28 @@ class OcrWorkerManager {
         } catch (e) {}
       }
 
-      const w = await createWorker(['ara', 'eng'], 1, {
+      const options: any = {
         langPath,
         cachePath: cacheDir,
         gzip: false,
-        errorHandler: (err) => console.warn('[OCR Worker Notice]:', err),
-      });
+        errorHandler: (err: any) => console.warn('[OCR Worker Notice]:', err),
+      };
+
+      // Explicitly provide workerPath so Webpack does not resolve relative to .next/server/app/api/v1/
+      const localWorkerScript = path.join(
+        process.cwd(),
+        'node_modules',
+        'tesseract.js',
+        'src',
+        'worker-script',
+        'node',
+        'index.js'
+      );
+      if (fs.existsSync(localWorkerScript)) {
+        options.workerPath = localWorkerScript;
+      }
+
+      const w = await createWorker(['ara', 'eng'], 1, options);
 
       this.worker = w;
       return w;
