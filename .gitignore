@@ -18,3 +18,4 @@ yarn-error.log*
 !lib/ocr/tessdata/*.traineddata.gz
 backups/
 public/uploads/
+storage/
