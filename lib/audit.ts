@@ -10,11 +10,13 @@ export interface CreateAuditLogParams {
   reason?: string;
   ipAddress?: string;
   userAgent?: string;
+  tx?: any;
 }
 
 export async function logAuditEvent(params: CreateAuditLogParams) {
   try {
-    return await prisma.auditLog.create({
+    const client = params.tx || prisma;
+    return await client.auditLog.create({
       data: {
         userId: params.userId,
         action: params.action,

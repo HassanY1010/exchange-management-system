@@ -124,6 +124,7 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
       entityId: entry.id,
       newValues: { entryNumber, linesCount: params.lines.length, amount: validation.totalDebit },
       reason: params.description,
+      tx,
     });
 
     return entry;

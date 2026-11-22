@@ -75,10 +75,17 @@ export async function GET(req: NextRequest) {
     .filter((a) => a.accountType === 'employee_custody' && a.currency === 'EGP')
     .reduce((sum, a) => sum + Number(a.currentBalance), 0);
 
-  // Accounting Equity (Invested Capital)
+  // Accounting Equity (Invested Capital per Currency strictly isolated)
   const capitalBalance = accounts
-    .filter((a) => a.accountType === 'capital')
+    .filter((a) => a.accountType === 'capital' && a.currency === 'EGP')
     .reduce((sum, a) => sum + Number(a.currentBalance), 0);
+
+  const capitalByCurrency: Record<string, number> = {};
+  accounts
+    .filter((a) => a.accountType === 'capital')
+    .forEach((a) => {
+      capitalByCurrency[a.currency] = (capitalByCurrency[a.currency] || 0) + Number(a.currentBalance);
+    });
 
   // 2. Today's sessions & counts (strictly excluding cancelled sessions)
   let todaySessions: any[] = [];
@@ -269,6 +276,7 @@ export async function GET(req: NextRequest) {
 
     // Confidential Company Equity & Debts: Admin & Accountant ONLY
     capitalBalance: isFinanceRole ? capitalBalance : 0,
+    capitalByCurrency: isFinanceRole ? capitalByCurrency : {},
     totalExpensesToday: isFinanceRole ? totalExpensesToday : 0,
     totalCustomerDebts: isFinanceRole ? totalCustomerDebts : 0,
     totalSupplierDebts: isFinanceRole ? totalSupplierDebts : 0,
