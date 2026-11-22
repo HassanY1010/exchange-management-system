@@ -9,7 +9,10 @@ export async function POST(req: NextRequest) {
   if (!user) return authError();
 
   if (!['admin', 'accountant'].includes(user.role)) {
-    return NextResponse.json({ error: 'صلاحية اعتماد المطابقة البنكية مقتصرة على المحاسب أو مدير النظام' }, { status: 403 });
+    return NextResponse.json(
+      { error: 'صلاحية اعتماد المطابقة البنكية مقتصرة على المحاسب أو مدير النظام' },
+      { status: 403 }
+    );
   }
 
   try {
@@ -32,18 +35,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'كشف الحساب غير موجود' }, { status: 404 });
     }
 
-    let verifiedCount = 0;
+    // Idempotency: If already confirmed, return current state safely without duplicate processing
+    if (statement.status === 'confirmed') {
+      return NextResponse.json({
+        success: true,
+        message: 'كشف الحساب معتمد مسبقاً بالفعل',
+        data: statement,
+      });
+    }
 
-    // Upgrade matched unverified receipts to 'verified' status without creating duplicate ledger entries
-    for (const line of statement.lines) {
-      if (line.matchedReceiptId) {
-        const receipt = await prisma.bankakReceipt.findUnique({
-          where: { id: line.matchedReceiptId },
+    // Collect distinct matched receipt IDs
+    const matchedReceiptIds = Array.from(
+      new Set(
+        statement.lines
+          .map((l) => l.matchedReceiptId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      )
+    );
+
+    // Atomic execution via transaction
+    const { updatedStatement, verifiedCount } = await prisma.$transaction(async (tx) => {
+      let count = 0;
+
+      if (matchedReceiptIds.length > 0) {
+        // Find receipts that are not yet approved or rejected
+        const pendingReceipts = await tx.bankakReceipt.findMany({
+          where: {
+            id: { in: matchedReceiptIds },
+            status: { notIn: ['approved', 'rejected'] },
+          },
+          select: { id: true, status: true },
         });
 
-        if (receipt && receipt.status !== 'approved' && receipt.status !== 'rejected') {
-          await prisma.bankakReceipt.update({
-            where: { id: receipt.id },
+        if (pendingReceipts.length > 0) {
+          const idsToUpgrade = pendingReceipts.map((r) => r.id);
+          const updateResult = await tx.bankakReceipt.updateMany({
+            where: { id: { in: idsToUpgrade } },
             data: {
               status: 'verified',
               verifiedBy: user.name,
@@ -52,15 +79,18 @@ export async function POST(req: NextRequest) {
               verificationNotes: `تم التحقق آلياً عبر كشف حساب بنكك رقم ${statement.statementNumber}`,
             },
           });
-          verifiedCount++;
+          count = updateResult.count;
         }
       }
-    }
 
-    const updatedStatement = await prisma.bankStatement.update({
-      where: { id: statementId },
-      data: { status: 'confirmed' },
-      include: { lines: true },
+      // Mark statement as confirmed
+      const confirmed = await tx.bankStatement.update({
+        where: { id: statementId },
+        data: { status: 'confirmed' },
+        include: { lines: true },
+      });
+
+      return { updatedStatement: confirmed, verifiedCount: count };
     });
 
     await logAuditEvent({
@@ -68,14 +98,17 @@ export async function POST(req: NextRequest) {
       action: 'CONFIRM_BANK_RECONCILIATION',
       entityType: 'BankStatement',
       entityId: statementId,
-      newValues: { confirmedMatchedLines: statement.lines.length, receiptsAutoVerified: verifiedCount },
+      newValues: {
+        confirmedMatchedLines: statement.lines.length,
+        receiptsAutoVerified: verifiedCount,
+      },
       reason: `تأكيد واعتماد مطابقة كشف الحساب البنكي رقم ${statement.statementNumber}`,
     });
 
     await createNotification({
       type: 'receipt_verified',
       title: 'تم اعتماد مطابقة كشف الحساب البنكي',
-      message: `تم اعتماد مطابقة كشف الحساب ${statement.statementNumber} وتأكيد وصول ${statement.lines.length} حوالة بنكية بنجاح`,
+      message: `تم اعتماد مطابقة كشف الحساب ${statement.statementNumber} وتأكيد وصول ${statement.lines.length} حركة بنكية`,
       referenceType: 'BankStatement',
       referenceId: statement.id,
       recipientRole: 'accountant',
@@ -84,11 +117,14 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `تم اعتماد المطابقة البنكية بنجاح. تم التحقق من ${verifiedCount} إيصال ونقلها إلى حالة Verified دون تكرار أي قيود مالية`,
+      message: `تم اعتماد المطابقة البنكية بنجاح. تم التحقق من ${verifiedCount} إيصال ونقلها إلى Verified دون تكرار أي قيود مالية`,
       data: updatedStatement,
     });
   } catch (error: any) {
     console.error('Error confirming reconciliation:', error);
-    return NextResponse.json({ error: error.message || 'خطأ في اعتماد المطابقة البنكية' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || 'خطأ في اعتماد المطابقة البنكية' },
+      { status: 500 }
+    );
   }
 }

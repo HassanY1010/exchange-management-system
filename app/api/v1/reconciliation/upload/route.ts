@@ -3,89 +3,101 @@ import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { logAuditEvent } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications/notification-service';
+import { parseBankStatementFile } from '@/lib/reconciliation/statement-parser';
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
   if (!['admin', 'accountant'].includes(user.role)) {
-    return NextResponse.json({ error: 'صلاحية استيراد كشف الحساب البنكي مقتصرة على المحاسب أو مدير النظام' }, { status: 403 });
+    return NextResponse.json(
+      { error: 'صلاحية استيراد كشف الحساب البنكي مقتصرة على المحاسب أو مدير النظام' },
+      { status: 403 }
+    );
   }
 
   try {
     const body = await req.json();
-    const { filename, bankAccountId, rawText, lines = [] } = body;
+    const { filename, bankAccountId, rawText, fileBase64, lines = [] } = body;
 
     let parsedLines = lines;
+    let fileHash = '';
 
-    // If rawText (CSV or tabular format) is provided, parse it
-    if ((!parsedLines || parsedLines.length === 0) && rawText) {
-      const textLines = rawText.split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
-      parsedLines = [];
+    // If fileBase64 or rawText is provided, parse through robust statement parser
+    if (fileBase64 || rawText) {
+      const buffer = fileBase64
+        ? Buffer.from(fileBase64.replace(/^data:[^;]+;base64,/, ''), 'base64')
+        : rawText;
 
-      for (let i = 0; i < textLines.length; i++) {
-        const line = textLines[i];
-        if (i === 0 && (line.includes('رقم') || line.includes('Transaction') || line.includes('Date'))) {
-          continue; // skip header row
-        }
-        // Split by comma or tab or semicolon
-        const cols = line.split(/[,;\t|]/).map((c: string) => c.trim().replace(/^["']|["']$/g, ''));
-        if (cols.length >= 2) {
-          // Columns expectation: [Date, TxnId, Amount, Sender, Beneficiary] or flexible
-          const txnId = cols[1] || cols[0];
-          const rawAmount = cols[2] ? cols[2].replace(/,/g, '') : cols[1].replace(/,/g, '');
-          const amount = parseFloat(rawAmount) || 0;
-          const date = cols[0].length >= 8 ? cols[0] : new Date().toISOString().slice(0, 10);
-          const sender = cols[3] || 'غير محدد';
-          const beneficiary = cols[4] || 'مكتب الصرافة';
+      const parseResult = parseBankStatementFile(buffer, filename || 'statement.csv');
 
-          if (txnId && amount > 0) {
-            parsedLines.push({
-              transactionId: txnId,
-              amount,
-              transactionDate: date,
-              senderName: sender,
-              beneficiaryName: beneficiary,
-              description: `حوالة واردة بنكك - ${txnId}`,
-            });
-          }
+      if (!parseResult.success) {
+        return NextResponse.json(
+          { error: parseResult.error || 'تعذر استخراج حركات بنكية صالحة من الملف' },
+          { status: 400 }
+        );
+      }
+
+      parsedLines = parseResult.validLines;
+      fileHash = parseResult.fileHash;
+
+      // Check if this exact file was already imported previously (Duplicate file prevention)
+      if (fileHash) {
+        const existingWithHash = await prisma.bankStatement.findFirst({
+          where: { fileStorageKey: fileHash },
+        });
+        if (existingWithHash) {
+          return NextResponse.json(
+            {
+              error: `هذا الملف تم استيراده مسبقاً برقم كشف ${existingWithHash.statementNumber} بتاريخ ${new Date(existingWithHash.createdAt).toLocaleDateString('ar-EG')}`,
+              existingStatementId: existingWithHash.id,
+            },
+            { status: 409 }
+          );
         }
       }
     }
 
     if (!parsedLines || parsedLines.length === 0) {
-      return NextResponse.json({ error: 'لم يتم العثور على أي حركات بنكية صالحة في الملف المستورد' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'لم يتم العثور على أي حركات بنكية صالحة في الملف المستورد' },
+        { status: 400 }
+      );
     }
 
-    const statementNumber = `STMT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
+    const statementNumber = `STMT-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const statement = await prisma.bankStatement.create({
-      data: {
-        statementNumber,
-        filename: filename || `bankak-statement-${Date.now()}.csv`,
-        accountId: bankAccountId || null,
-        totalLines: parsedLines.length,
-        matchedLines: 0,
-        unmatchedLines: parsedLines.length,
-        status: 'uploaded',
-        importedBy: user.name,
-        lines: {
-          create: parsedLines.map((p: any) => ({
-            transactionId: p.transactionId,
-            amount: Number(p.amount),
-            currency: 'SDG',
-            transactionDate: p.transactionDate || new Date().toISOString().slice(0, 10),
-            transactionTime: p.transactionTime || '12:00:00',
-            senderName: p.senderName || null,
-            beneficiaryName: p.beneficiaryName || null,
-            description: p.description || null,
-            matchStatus: 'unmatched',
-          })),
+    // Atomic transaction for statement and lines creation
+    const statement = await prisma.$transaction(async (tx) => {
+      return await tx.bankStatement.create({
+        data: {
+          statementNumber,
+          filename: filename || `bankak-statement-${Date.now()}.csv`,
+          fileStorageKey: fileHash || null,
+          accountId: bankAccountId || null,
+          totalLines: parsedLines.length,
+          matchedLines: 0,
+          unmatchedLines: parsedLines.length,
+          status: 'uploaded',
+          importedBy: user.name,
+          lines: {
+            create: parsedLines.map((p: any) => ({
+              transactionId: String(p.transactionId).trim(),
+              amount: Number(p.amount),
+              currency: p.currency || 'SDG',
+              transactionDate: p.transactionDate || new Date().toISOString().slice(0, 10),
+              transactionTime: p.transactionTime || '12:00:00',
+              senderName: p.senderName || null,
+              beneficiaryName: p.beneficiaryName || null,
+              description: p.description || null,
+              matchStatus: 'unmatched',
+            })),
+          },
         },
-      },
-      include: {
-        lines: true,
-      },
+        include: {
+          lines: true,
+        },
+      });
     });
 
     await logAuditEvent({
@@ -93,7 +105,7 @@ export async function POST(req: NextRequest) {
       action: 'IMPORT_BANK_STATEMENT',
       entityType: 'BankStatement',
       entityId: statement.id,
-      newValues: { statementNumber, totalLines: parsedLines.length },
+      newValues: { statementNumber, totalLines: parsedLines.length, fileHash },
       reason: `استيراد كشف حساب بنكك (${parsedLines.length} حركة)`,
     });
 
@@ -107,13 +119,19 @@ export async function POST(req: NextRequest) {
       priority: 'normal',
     });
 
-    return NextResponse.json({
-      success: true,
-      message: `تم استيراد كشف الحساب بنجاح (${statement.totalLines} حركة بنكية)`,
-      data: statement,
-    }, { status: 201 });
+    return NextResponse.json(
+      {
+        success: true,
+        message: `تم استيراد كشف الحساب بنجاح (${statement.totalLines} حركة بنكية)`,
+        data: statement,
+      },
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error('Error importing bank statement:', error);
-    return NextResponse.json({ error: error.message || 'خطأ أثناء استيراد كشف الحساب' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || 'خطأ أثناء استيراد كشف الحساب' },
+      { status: 500 }
+    );
   }
 }
