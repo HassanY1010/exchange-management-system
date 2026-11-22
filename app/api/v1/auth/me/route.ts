@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, authError } from '@/lib/auth';
+import { getUserFromRequest, authError, revokeToken } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { logAuditEvent } from '@/lib/audit';
 
@@ -26,6 +26,22 @@ export async function GET(req: NextRequest) {
     return authError('المستخدم غير موجود');
   }
 
+  // Prevent active sessions for suspended or inactive accounts
+  if (user.status !== 'active') {
+    const res = NextResponse.json(
+      { error: 'هذا الحساب معطل أو موقوف من قبل الإدارة', success: false },
+      { status: 403 }
+    );
+    res.cookies.set('auth_token', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: 0,
+      sameSite: 'lax',
+    });
+    return res;
+  }
+
   return NextResponse.json({
     success: true,
     user: {
@@ -41,6 +57,20 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const userPayload = await getUserFromRequest(req);
+  const authHeader = req.headers.get('authorization');
+  let token = '';
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+  } else if (req.cookies.get('auth_token')?.value) {
+    token = req.cookies.get('auth_token')!.value;
+  }
+
+  // Revoke token immediately so it cannot be reused
+  if (token) {
+    await revokeToken(token);
+  }
+
   if (userPayload) {
     await logAuditEvent({
       userId: userPayload.userId,
@@ -49,9 +79,17 @@ export async function POST(req: NextRequest) {
       entityId: userPayload.userId,
       newValues: { email: userPayload.email, role: userPayload.role },
       reason: 'تسجيل خروج المستخدم من النظام',
+      ipAddress: req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1',
     });
   }
-  const res = NextResponse.json({ success: true, message: 'تم تسجيل الخروج بنجاح' });
-  res.cookies.delete('auth_token');
+
+  const res = NextResponse.json({ success: true, message: 'تم تسجيل الخروج وإبطال الجلسة بنجاح' });
+  res.cookies.set('auth_token', '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: 0,
+    sameSite: 'lax',
+  });
   return res;
 }

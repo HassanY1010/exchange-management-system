@@ -332,13 +332,20 @@ async function runAuditLogsProductionTests() {
     assert(logoutLog !== null, 'USER_LOGOUT audit log recorded');
     assert(logoutLog?.entityType === 'User', 'Logout entityType is User');
 
-    // 10.2 Test Expense Category Creation Audit
+    // 10.2 Test Expense Category Creation Audit (use fresh token since previous token was securely revoked on logout)
+    const freshAdminToken = generateToken({
+      userId: adminUser.id,
+      email: adminUser.email,
+      name: adminUser.name,
+      role: 'admin',
+    });
+
     const catName = `اختبار فئة ${Date.now()}`;
     const catReq = {
       method: 'POST',
       url: 'http://localhost:3000/api/v1/expenses/categories',
       headers: new Headers({
-        authorization: `Bearer ${adminAuthToken}`,
+        authorization: `Bearer ${freshAdminToken}`,
       }),
       cookies: {
         get: () => undefined,
