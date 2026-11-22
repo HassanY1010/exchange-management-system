@@ -492,26 +492,52 @@ export async function getBalanceSheetReport(params: {
 
       if (accClass === '1') {
         // Asset: Normal Debit = Opening + Debit - Credit
-        const balance = baseOpening.plus(sumDebit).minus(sumCredit);
-        balanceSheetByCurrency[cur].assets.items.push({
-          id: acc.id,
-          accountCode: acc.accountCode,
-          name: acc.name,
-          accountType: acc.accountType,
-          balance: balance.toNumber(),
-        });
-        balanceSheetByCurrency[cur].assets.total = balanceSheetByCurrency[cur].assets.total.plus(balance);
+        const netDebit = baseOpening.plus(sumDebit).minus(sumCredit);
+        if (netDebit.greaterThanOrEqualTo(0)) {
+          balanceSheetByCurrency[cur].assets.items.push({
+            id: acc.id,
+            accountCode: acc.accountCode,
+            name: acc.name,
+            accountType: acc.accountType,
+            balance: netDebit.toNumber(),
+          });
+          balanceSheetByCurrency[cur].assets.total = balanceSheetByCurrency[cur].assets.total.plus(netDebit);
+        } else {
+          // Asset with credit balance (e.g. clearing payable or bank overdraft) -> reclassify under Liabilities
+          const creditBal = netDebit.negated();
+          balanceSheetByCurrency[cur].liabilities.items.push({
+            id: acc.id,
+            accountCode: acc.accountCode,
+            name: `${acc.name} (التزامات تسوية ومقاصة دائنة)`,
+            accountType: acc.accountType,
+            balance: creditBal.toNumber(),
+          });
+          balanceSheetByCurrency[cur].liabilities.total = balanceSheetByCurrency[cur].liabilities.total.plus(creditBal);
+        }
       } else if (accClass === '2') {
         // Liability: Normal Credit = Opening + Credit - Debit
-        const balance = baseOpening.plus(sumCredit).minus(sumDebit);
-        balanceSheetByCurrency[cur].liabilities.items.push({
-          id: acc.id,
-          accountCode: acc.accountCode,
-          name: acc.name,
-          accountType: acc.accountType,
-          balance: balance.toNumber(),
-        });
-        balanceSheetByCurrency[cur].liabilities.total = balanceSheetByCurrency[cur].liabilities.total.plus(balance);
+        const netCredit = baseOpening.plus(sumCredit).minus(sumDebit);
+        if (netCredit.greaterThanOrEqualTo(0)) {
+          balanceSheetByCurrency[cur].liabilities.items.push({
+            id: acc.id,
+            accountCode: acc.accountCode,
+            name: acc.name,
+            accountType: acc.accountType,
+            balance: netCredit.toNumber(),
+          });
+          balanceSheetByCurrency[cur].liabilities.total = balanceSheetByCurrency[cur].liabilities.total.plus(netCredit);
+        } else {
+          // Liability with debit balance (e.g. customer debit balance / advance) -> reclassify under Assets
+          const debitBal = netCredit.negated();
+          balanceSheetByCurrency[cur].assets.items.push({
+            id: acc.id,
+            accountCode: acc.accountCode,
+            name: `${acc.name} (أرصدة وذمم مدينة للعملاء)`,
+            accountType: acc.accountType,
+            balance: debitBal.toNumber(),
+          });
+          balanceSheetByCurrency[cur].assets.total = balanceSheetByCurrency[cur].assets.total.plus(debitBal);
+        }
       } else if (accClass === '3') {
         // Equity: Normal Credit = Opening + Credit - Debit
         const balance = baseOpening.plus(sumCredit).minus(sumDebit);
@@ -582,10 +608,16 @@ export async function getCashFlowReport(params: {
 }) {
   const { fromDate, toDate, currency } = params;
 
-  // Cash accounts: cash_safe, bank, bankak, employee_custody
+  // Cash accounts: cash_safe, bank, bankak, employee_custody (strictly excluding clearing accounts)
   const cashAccounts = await prisma.account.findMany({
     where: {
       accountType: { in: ['cash_safe', 'bank', 'bankak', 'employee_custody'] },
+      NOT: {
+        OR: [
+          { accountCode: { in: ['1060', '1065', '1066', '1067'] } },
+          { accountType: 'clearing' },
+        ],
+      },
       status: 'active',
       ...(currency ? { currency } : {}),
     },
