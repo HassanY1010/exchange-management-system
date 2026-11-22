@@ -128,6 +128,14 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return NextResponse.json(
+        {
+          error: 'تم استيراد هذا الملف مسبقاً بنفس المحتوى والتجزئة (Duplicate Statement File - Database Constraint)',
+        },
+        { status: 409 }
+      );
+    }
     console.error('Error importing bank statement:', error);
     return NextResponse.json(
       { error: error.message || 'خطأ أثناء استيراد كشف الحساب' },

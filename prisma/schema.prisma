@@ -455,7 +455,7 @@ model BankStatement {
   bankName        String              @default("بنكك - بنك الخرطوم")
   accountId       String?
   filename        String
-  fileStorageKey  String?
+  fileStorageKey  String?             @unique
   startDate       String?
   endDate         String?
   totalLines      Int                 @default(0)

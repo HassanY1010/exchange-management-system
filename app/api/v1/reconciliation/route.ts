@@ -52,15 +52,18 @@ export async function GET(req: NextRequest) {
         take: pageSize,
       }),
       prisma.bankStatementLine.groupBy({
-        by: ['matchStatus'],
+        by: ['matchStatus', 'currency'],
         where: { statementId },
         _count: { id: true },
         _sum: { amount: true },
       }),
     ]);
 
+    const primaryCurrency = lines[0]?.currency || 'SDG';
+
     const stats = {
       total: statement.totalLines,
+      currency: primaryCurrency,
       matchedCount: 0,
       matchedAmount: 0,
       mismatchCount: 0,
@@ -71,15 +74,32 @@ export async function GET(req: NextRequest) {
       duplicateAmount: 0,
       unmatchedCount: 0,
       unmatchedAmount: 0,
+      // Net genuine volume excluding duplicate movements
+      netTotalAmount: 0,
+      grossTotalAmount: 0,
+      byCurrency: {} as Record<string, { count: number; sum: number }>,
     };
 
     for (const group of statsRaw) {
       const count = group._count.id;
       const sum = Number(group._sum.amount || 0);
+      const curr = group.currency || 'SDG';
+
+      if (!stats.byCurrency[curr]) {
+        stats.byCurrency[curr] = { count: 0, sum: 0 };
+      }
+      stats.byCurrency[curr].count += count;
+      stats.byCurrency[curr].sum += sum;
+
+      stats.grossTotalAmount += sum;
+      if (group.matchStatus !== 'duplicate') {
+        stats.netTotalAmount += sum;
+      }
+
       switch (group.matchStatus) {
         case 'matched':
-          stats.matchedCount = count;
-          stats.matchedAmount = sum;
+          stats.matchedCount += count;
+          stats.matchedAmount += sum;
           break;
         case 'amount_mismatch':
         case 'conflict':

@@ -165,6 +165,29 @@ TXN-ENG-202,Jane Smith,4200000,2026-11-21,Deposit`;
     'كشف ومنع تكرار استيراد نفس الملف بالكامل (Duplicate File Protection - 409 Conflict)'
   );
 
+  // Test 7b: Concurrent Duplicate Uploads (Atomic DB Unique Constraint Protection)
+  const concurrentSalt = Date.now();
+  const concurrentCsv = `التاريخ,رقم العملية,المبلغ,المرسل
+2026-11-20,BOK-CONCUR-${concurrentSalt},"1,000,000",عميل اختبار التزامن`;
+
+  const reqA = new NextRequest('http://localhost:3000/api/v1/reconciliation/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },
+    body: JSON.stringify({ filename: `concurrent-a-${concurrentSalt}.csv`, rawText: concurrentCsv }),
+  });
+  const reqB = new NextRequest('http://localhost:3000/api/v1/reconciliation/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },
+    body: JSON.stringify({ filename: `concurrent-b-${concurrentSalt}.csv`, rawText: concurrentCsv }),
+  });
+
+  const [resA, resB] = await Promise.all([uploadStatement(reqA), uploadStatement(reqB)]);
+  const statuses = [resA.status, resB.status].sort();
+  assert(
+    statuses[0] === 201 && statuses[1] === 409,
+    'منع تكرار الرفع المتزامن في نفس اللحظة عبر قيد قاعدة البيانات الفريد (Concurrent Upload Race Protection - 201 vs 409)'
+  );
+
   // --- 3. إعداد بيانات الإيصالات وسيناريوهات المطابقة (Matching Engine Tests) ---
   console.log('\n--- 3. اختبارات محرك المطابقة بمختلف الحالات (Matching Scenarios) ---');
 
@@ -381,6 +404,46 @@ TXN-ENG-202,Jane Smith,4200000,2026-11-21,Deposit`;
       getJson.stats.matchedCount === 1 &&
       getJson.data.length >= 5,
     'استرجاع كشف الحساب مع إحصائيات الـ KPIs والـ Pagination بدقة ودون تحميل غير ضروري'
+  );
+
+  // Test 19: Rejected and Suspicious Receipt Immunity on Confirm (Point 5)
+  const r2After = await prisma.bankakReceipt.findUnique({ where: { id: r2.id } });
+  assert(
+    r2After?.status === 'uploaded',
+    'حماية الاعتماد: الإيصالات ذات المبالغ غير المطابقة أو المعلقة لا يتم ترقيتها إلى verified'
+  );
+
+  // Test 20: Cross-statement matching prevention (Point 4)
+  const stmt2Csv = `التاريخ,رقم العملية,المبلغ,المرسل
+2026-11-20,TXN-MATCH-EXACT-${runSalt},1000000,عمر أحمد`;
+  const upStmt2Req = new NextRequest('http://localhost:3000/api/v1/reconciliation/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },
+    body: JSON.stringify({ filename: `stmt2-${Date.now()}.csv`, rawText: stmt2Csv }),
+  });
+  const upStmt2Res = await uploadStatement(upStmt2Req);
+  const upStmt2Json = await upStmt2Res.json();
+  const stmt2Id = upStmt2Json.data.id;
+
+  const matchStmt2Req = new NextRequest('http://localhost:3000/api/v1/reconciliation/match', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenAccountant}` },
+    body: JSON.stringify({ statementId: stmt2Id }),
+  });
+  const matchStmt2Res = await matchStatement(matchStmt2Req);
+  const matchStmt2Json = await matchStmt2Res.json();
+
+  assert(
+    matchStmt2Json.summary.duplicate === 1 && matchStmt2Json.summary.matched === 0,
+    'منع ربط الإيصال بأكثر من كشف: اكتشاف مطابقة الإيصال مسبقاً في كشف سابق وتصنيفه كـ duplicate'
+  );
+
+  // Test 21: Net total volume calculation does not inflate due to duplicates (Point 7)
+  assert(
+    getJson.stats.netTotalAmount < getJson.stats.grossTotalAmount &&
+      getJson.stats.duplicateAmount > 0 &&
+      getJson.stats.currency === 'SDG',
+    'نزاهة العملات والإجماليات: العمليات المكررة لا تضخم صافي الحجم الإجمالي وعزل مبالغ التكرار بدقة'
   );
 
   console.log('\n========================================================================================');

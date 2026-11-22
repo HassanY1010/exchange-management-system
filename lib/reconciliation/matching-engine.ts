@@ -49,20 +49,27 @@ export async function runBankReconciliationMatching(
     .map((l) => l.transactionId?.trim().toLowerCase())
     .filter(Boolean);
 
+  const statementTxns = Array.from(
+    new Set(statement.lines.map((l) => l.transactionId?.trim()).filter((t): t is string => Boolean(t)))
+  );
+
   const dates = statement.lines
     .map((l) => l.transactionDate)
     .filter((d) => d && d.length === 10)
     .sort();
 
-  const minDate = dates[0] || '1970-01-01';
-  const maxDate = dates[dates.length - 1] || '2099-12-31';
+  const statementDates = Array.from(new Set(dates));
+  const statementAmounts = Array.from(new Set(statement.lines.map((l) => l.amount)));
 
-  // 2. Query only relevant receipts (targeted query, zero memory leak)
+  // 2. Query only relevant receipts (targeted query, zero memory leak, no arbitrary truncation)
   const receipts = await prisma.bankakReceipt.findMany({
     where: {
       OR: [
-        { transactionId: { in: statement.lines.map((l) => l.transactionId) } },
-        { transactionDate: { gte: minDate, lte: maxDate } },
+        { transactionId: { in: statementTxns } },
+        {
+          transactionDate: { in: statementDates },
+          amount: { in: statementAmounts },
+        },
       ],
     },
     select: {
@@ -70,6 +77,7 @@ export async function runBankReconciliationMatching(
       receiptNumber: true,
       transactionId: true,
       amount: true,
+      currency: true,
       transactionDate: true,
       senderName: true,
       status: true,
@@ -80,21 +88,31 @@ export async function runBankReconciliationMatching(
     },
   });
 
-  // 3. Query other statements to detect cross-statement duplicates
+  // 3. Query other statements to detect cross-statement duplicates (by TXN and by matchedReceiptId)
   const otherStatementLines = await prisma.bankStatementLine.findMany({
     where: {
       statementId: { not: statementId },
       matchStatus: { in: ['matched', 'confirmed'] },
-      transactionId: { in: statement.lines.map((l) => l.transactionId) },
+      OR: [
+        { transactionId: { in: statementTxns } },
+        { matchedReceiptId: { in: receipts.map((r) => r.id) } },
+      ],
     },
     select: {
       transactionId: true,
+      matchedReceiptId: true,
       statementId: true,
     },
   });
 
   const previouslyReconciledTxns = new Set(
-    otherStatementLines.map((l) => l.transactionId.trim().toLowerCase())
+    otherStatementLines.map((l) => l.transactionId?.trim().toLowerCase()).filter(Boolean)
+  );
+
+  const previouslyMatchedReceiptIds = new Set(
+    otherStatementLines
+      .map((l) => l.matchedReceiptId)
+      .filter((id): id is string => Boolean(id))
   );
 
   // 4. Track intra-file TXN frequency
@@ -190,15 +208,17 @@ export async function runBankReconciliationMatching(
           continue;
         }
 
-        // Check if receipt already matched to another line in this run
-        if (matchedReceiptIdsInRun.has(exactReceipt.id)) {
+        // Check if receipt already matched to another line in this run or in another statement
+        if (matchedReceiptIdsInRun.has(exactReceipt.id) || previouslyMatchedReceiptIds.has(exactReceipt.id)) {
           updates.push({
             id: line.id,
             matchStatus: 'duplicate',
             matchedReceiptId: exactReceipt.id,
             matchedAt: null,
             matchedBy: user.name,
-            notes: `تكرار: الإيصال ${exactReceipt.receiptNumber} ارتبط بالفعل بحركة بنكية سابقة في هذا الكشف`,
+            notes: matchedReceiptIdsInRun.has(exactReceipt.id)
+              ? `تكرار: الإيصال ${exactReceipt.receiptNumber} ارتبط بالفعل بحركة بنكية سابقة في هذا الكشف`
+              : `تكرار: الإيصال ${exactReceipt.receiptNumber} ارتبط بالفعل بمطابقة سابقة في كشف حساب آخر`,
           });
           summary.duplicate++;
           summary.unmatchedAmountSDG += lineAmount;
@@ -239,7 +259,8 @@ export async function runBankReconciliationMatching(
         (r) =>
           Math.abs(Number(r.amount) - lineAmount) < 0.01 &&
           r.transactionDate === line.transactionDate &&
-          !matchedReceiptIdsInRun.has(r.id)
+          !matchedReceiptIdsInRun.has(r.id) &&
+          !previouslyMatchedReceiptIds.has(r.id)
       );
 
       if (candidates.length === 1) {

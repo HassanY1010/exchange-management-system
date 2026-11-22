@@ -58,11 +58,12 @@ export async function POST(req: NextRequest) {
       let count = 0;
 
       if (matchedReceiptIds.length > 0) {
-        // Find receipts that are not yet approved or rejected
+        // Find receipts that are clean and not approved, rejected, duplicate, or suspicious
         const pendingReceipts = await tx.bankakReceipt.findMany({
           where: {
             id: { in: matchedReceiptIds },
-            status: { notIn: ['approved', 'rejected'] },
+            status: { notIn: ['approved', 'rejected', 'duplicate', 'failed'] },
+            isSuspicious: false,
           },
           select: { id: true, status: true },
         });

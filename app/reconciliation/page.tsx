@@ -443,7 +443,7 @@ export default function ReconciliationPage() {
               <span className="text-[11px] text-slate-500 block mb-0.5 font-bold">إجمالي الحركات</span>
               <span className="text-xl font-black text-slate-900 font-mono">{stats.total}</span>
               <span className="text-[10px] text-slate-400 block mt-1 font-mono">
-                {((stats.matchedAmount || 0) + (stats.unmatchedAmount || 0)).toLocaleString()} SDG
+                صافي: {(stats.netTotalAmount ?? ((stats.matchedAmount || 0) + (stats.unmatchedAmount || 0))).toLocaleString()} {stats.currency || 'SDG'}
               </span>
             </div>
 
@@ -451,7 +451,7 @@ export default function ReconciliationPage() {
               <span className="text-[11px] text-emerald-800 block mb-0.5 font-bold">مطابق مؤكد</span>
               <span className="text-xl font-black text-emerald-900 font-mono">{stats.matchedCount}</span>
               <span className="text-[10px] text-emerald-700 block mt-1 font-mono">
-                {Number(stats.matchedAmount || 0).toLocaleString()} SDG
+                {Number(stats.matchedAmount || 0).toLocaleString()} {stats.currency || 'SDG'}
               </span>
             </div>
 
@@ -459,7 +459,7 @@ export default function ReconciliationPage() {
               <span className="text-[11px] text-amber-800 block mb-0.5 font-bold">اشتباه / مرشحين</span>
               <span className="text-xl font-black text-amber-900 font-mono">{stats.suspiciousCount}</span>
               <span className="text-[10px] text-amber-700 block mt-1 font-mono">
-                {Number(stats.suspiciousAmount || 0).toLocaleString()} SDG
+                {Number(stats.suspiciousAmount || 0).toLocaleString()} {stats.currency || 'SDG'}
               </span>
             </div>
 
@@ -467,7 +467,7 @@ export default function ReconciliationPage() {
               <span className="text-[11px] text-rose-800 block mb-0.5 font-bold">اختلاف مالي / تعارض</span>
               <span className="text-xl font-black text-rose-900 font-mono">{stats.mismatchCount}</span>
               <span className="text-[10px] text-rose-700 block mt-1 font-mono">
-                {Number(stats.mismatchAmount || 0).toLocaleString()} SDG
+                {Number(stats.mismatchAmount || 0).toLocaleString()} {stats.currency || 'SDG'}
               </span>
             </div>
 
@@ -475,7 +475,7 @@ export default function ReconciliationPage() {
               <span className="text-[11px] text-purple-800 block mb-0.5 font-bold">حركات مكررة</span>
               <span className="text-xl font-black text-purple-900 font-mono">{stats.duplicateCount}</span>
               <span className="text-[10px] text-purple-700 block mt-1 font-mono">
-                {Number(stats.duplicateAmount || 0).toLocaleString()} SDG
+                {Number(stats.duplicateAmount || 0).toLocaleString()} {stats.currency || 'SDG'}
               </span>
             </div>
 
@@ -483,7 +483,7 @@ export default function ReconciliationPage() {
               <span className="text-[11px] text-slate-600 block mb-0.5 font-bold">غير مسجل</span>
               <span className="text-xl font-black text-slate-800 font-mono">{stats.unmatchedCount}</span>
               <span className="text-[10px] text-slate-500 block mt-1 font-mono">
-                {Number(stats.unmatchedAmount || 0).toLocaleString()} SDG
+                {Number(stats.unmatchedAmount || 0).toLocaleString()} {stats.currency || 'SDG'}
               </span>
             </div>
           </div>
