@@ -4,6 +4,7 @@ import { getUserFromRequest, authError } from '@/lib/auth';
 import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
 import { calculateSessionBalance } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
+import Decimal from 'decimal.js';
 
 export async function POST(
   req: NextRequest,
@@ -12,18 +13,27 @@ export async function POST(
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  if (!['admin', 'accountant', 'custody_officer'].includes(user.role)) {
+    return NextResponse.json(
+      { error: 'صلاحية تسليم النقدية للعملاء مقتصرة على مسؤول العهدة أو المحاسب أو المدير' },
+      { status: 403 }
+    );
+  }
+
   try {
     const { customerId, customerSessionId, amount, notes } = await req.json();
 
-    const deliverAmount = Number(amount);
-    if (!deliverAmount || deliverAmount <= 0) {
-      return NextResponse.json({ error: 'مبلغ التسليم يجب أن يكون أكبر من صفر' }, { status: 400 });
+    const dDeliver = new Decimal(amount || 0);
+    if (dDeliver.isNaN() || dDeliver.lessThanOrEqualTo(0)) {
+      return NextResponse.json({ error: 'مبلغ التسليم يجب أن يكون رقماً أكبر من صفر' }, { status: 400 });
     }
 
-    // Execute with atomic row-level lock on EmployeeCustody
+    const deliverAmount = dDeliver.toNumber();
+
+    // Execute with atomic row-level lock on EmployeeCustody and ledger entry inside single transaction
     const result = await prisma.$transaction(async (tx) => {
       const lockedCustodies = await tx.$queryRawUnsafe<any[]>(
-        'SELECT id, "currentAmount", "status", "accountId", "employeeId" FROM "EmployeeCustody" WHERE id = $1 FOR UPDATE',
+        'SELECT id, "currentAmount", "status", "accountId", "employeeId", "currency" FROM "EmployeeCustody" WHERE id = $1 FOR UPDATE',
         params.id
       );
       const lockedCustody = lockedCustodies[0];
@@ -31,14 +41,16 @@ export async function POST(
         throw new Error('سجل العهدة غير موجود');
       }
 
-      if (lockedCustody.status === 'closed') {
-        throw new Error('هذه العهدة مغلقة ولا يمكن الصرف منها');
+      if (lockedCustody.status !== 'open') {
+        throw new Error('هذه العهدة مغلقة أو مسواة ولا يمكن الصرف منها');
       }
 
-      // Rule from Page 21: "لا يسمح النظام بتسليم مبلغ أكبر من العهدة المتاحة"
-      const currentCustodyAmount = Number(lockedCustody.currentAmount);
-      if (currentCustodyAmount < deliverAmount) {
-        throw new Error(`رصيد العهدة المتاح للموظف (${currentCustodyAmount.toLocaleString()} EGP) أقل من المبلغ المطلوب تسليمه (${deliverAmount.toLocaleString()} EGP)`);
+      // Rule: "لا يسمح النظام بتسليم مبلغ أكبر من العهدة المتاحة"
+      const currentCustodyAmount = new Decimal(lockedCustody.currentAmount.toString());
+      if (currentCustodyAmount.lessThan(dDeliver)) {
+        throw new Error(
+          `رصيد العهدة المتاح للموظف (${currentCustodyAmount.toFixed(2)} ${lockedCustody.currency}) أقل من المبلغ المطلوب تسليمه (${dDeliver.toFixed(2)} ${lockedCustody.currency})`
+        );
       }
 
       const customer = await tx.customer.findUnique({
@@ -46,23 +58,31 @@ export async function POST(
       });
 
       if (!customer) {
-        throw new Error('العميل غير موجود');
+        throw new Error('العميل المستلم غير موجود');
       }
 
       const employee = await tx.employee.findUnique({
         where: { id: lockedCustody.employeeId },
       });
 
-      const customerLiabilityAccount = await tx.account.findFirst({
-        where: { accountCode: '2010' },
+      // Liability clearing account: 2010 (EGP) or 2015 (SDG)
+      const liabilityCode = lockedCustody.currency === 'SDG' ? '2015' : '2010';
+      let customerLiabilityAccount = await tx.account.findFirst({
+        where: { accountCode: liabilityCode },
       });
 
       if (!customerLiabilityAccount) {
-        throw new Error('حساب التزامات العملاء غير موجود');
+        customerLiabilityAccount = await tx.account.findFirst({
+          where: { accountType: 'customer_balance', currency: lockedCustody.currency },
+        });
+      }
+
+      if (!customerLiabilityAccount) {
+        throw new Error(`حساب التزامات العملاء لعملة (${lockedCustody.currency}) غير مهيأ في الدليل المحاسبي`);
       }
 
       // 1. Update custody balance atomically
-      const newCustodyBalance = currentCustodyAmount - deliverAmount;
+      const newCustodyBalance = currentCustodyAmount.minus(dDeliver).toNumber();
       await tx.employeeCustody.update({
         where: { id: params.id },
         data: { currentAmount: newCustodyBalance },
@@ -74,7 +94,7 @@ export async function POST(
           custodyId: params.id,
           transactionType: 'delivery_to_customer',
           amount: deliverAmount,
-          currency: 'EGP',
+          currency: lockedCustody.currency,
           customerId: customer.id,
           referenceNumber: `DLV-${Date.now()}`,
           description: `تسليم نقدية للعميل ${customer.name} ${notes ? `(${notes})` : ''}`,
@@ -82,7 +102,33 @@ export async function POST(
         },
       });
 
-      // 3. Update Customer Session delivered total if linked
+      // 3. Post Double-Entry Ledger Entry INSIDE the transaction (tx)
+      await postLedgerTransaction({
+        entryType: 'custody_delivery',
+        referenceType: 'CustodyTransaction',
+        referenceId: custodyTxn.id,
+        description: `تسليم نقدية ${deliverAmount.toLocaleString()} ${lockedCustody.currency} للعميل ${customer.name} من عهدة ${employee?.name || 'الموظف'}`,
+        createdBy: user.name,
+        tx,
+        lines: [
+          {
+            accountId: customerLiabilityAccount.id,
+            currency: lockedCustody.currency,
+            debit: deliverAmount,
+            credit: 0,
+            description: `تسليم نقدية للعميل ${customer.name}`,
+          },
+          {
+            accountId: lockedCustody.accountId,
+            currency: lockedCustody.currency,
+            debit: 0,
+            credit: deliverAmount,
+            description: `صرف من عهدة ${employee?.name || 'الموظف'}`,
+          },
+        ],
+      });
+
+      // 4. Update Customer Session delivered total if linked
       if (customerSessionId) {
         const session = await tx.customerSession.findUnique({ where: { id: customerSessionId } });
         if (session) {
@@ -112,51 +158,27 @@ export async function POST(
         customerName: customer.name,
         employeeName: employee?.name || 'الموظف',
         accountId: lockedCustody.accountId,
+        currency: lockedCustody.currency,
       };
     });
-
-    // 4. Post Double-Entry Ledger Entry (Debit Customer Liability, Credit Employee Custody)
-    const customerLiabilityAccount = await prisma.account.findFirst({
-      where: { accountCode: '2010' },
-    });
-    if (customerLiabilityAccount) {
-      await postLedgerTransaction({
-        entryType: 'custody_delivery',
-        referenceType: 'CustodyTransaction',
-        referenceId: params.id,
-        description: `تسليم نقدية ${deliverAmount.toLocaleString()} EGP للعميل ${result.customerName} من عهدة ${result.employeeName}`,
-        createdBy: user.name,
-        lines: [
-          {
-            accountId: customerLiabilityAccount.id,
-            currency: 'EGP',
-            debit: deliverAmount,
-            credit: 0,
-            description: `تسليم نقدية للعميل ${result.customerName}`,
-          },
-          {
-            accountId: result.accountId,
-            currency: 'EGP',
-            debit: 0,
-            credit: deliverAmount,
-            description: `صرف من عهدة ${result.employeeName}`,
-          },
-        ],
-      });
-    }
 
     await logAuditEvent({
       userId: user.userId,
       action: 'CUSTODY_DELIVERY',
       entityType: 'EmployeeCustody',
       entityId: params.id,
-      newValues: { customer: result.customerName, deliveredAmount: deliverAmount, remainingCustody: result.newCustodyBalance },
-      reason: `تسليم نقدية للعميل ${result.customerName}`,
+      newValues: {
+        customer: result.customerName,
+        deliveredAmount: deliverAmount,
+        currency: result.currency,
+        remainingCustody: result.newCustodyBalance,
+      },
+      reason: `تسليم نقدية رسمية للعميل ${result.customerName} من عهدة ${result.employeeName}`,
     });
 
     return NextResponse.json({
       success: true,
-      message: 'تم تسليم المبلغ للعميل وتحديث رصيد العهدة بنجاح',
+      message: 'تم تسليم المبلغ للعميل وتحديث رصيد العهدة وتسجيل القيد بنجاح',
       data: {
         custodyBalanceRemaining: result.newCustodyBalance,
         custodyTxn: result.custodyTxn,
