@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { calculateSessionBalance } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
@@ -33,13 +33,16 @@ export async function POST(
     // Execute with atomic row-level lock on EmployeeCustody and ledger entry inside single transaction
     const result = await prisma.$transaction(async (tx) => {
       const lockedCustodies = await tx.$queryRawUnsafe<any[]>(
-        'SELECT id, "currentAmount", "status", "accountId", "employeeId", "currency" FROM "EmployeeCustody" WHERE id = $1 FOR UPDATE',
+        'SELECT id, "currentAmount", "status", "accountId", "employeeId", "currency", "businessDate" FROM "EmployeeCustody" WHERE id = $1 FOR UPDATE',
         params.id
       );
       const lockedCustody = lockedCustodies[0];
       if (!lockedCustody) {
         throw new Error('سجل العهدة غير موجود');
       }
+
+      // Assert that the custody's business date is open and not frozen
+      await assertBusinessDateOpen(lockedCustody.businessDate, tx);
 
       if (lockedCustody.status !== 'open') {
         throw new Error('هذه العهدة مغلقة أو مسواة ولا يمكن الصرف منها');
@@ -107,6 +110,7 @@ export async function POST(
         entryType: 'custody_delivery',
         referenceType: 'CustodyTransaction',
         referenceId: custodyTxn.id,
+        entryDate: lockedCustody.businessDate,
         description: `تسليم نقدية ${deliverAmount.toLocaleString()} ${lockedCustody.currency} للعميل ${customer.name} من عهدة ${employee?.name || 'الموظف'}`,
         createdBy: user.name,
         tx,

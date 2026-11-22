@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import { CurrencyInventoryService } from '@/lib/inventory/currency-inventory-service';
 import Decimal from 'decimal.js';
@@ -90,7 +91,11 @@ export async function POST(req: NextRequest) {
       paymentAccountId,
       vaultAccountId,
       notes,
+      transactionDate,
+      businessDate,
     } = body;
+
+    const txnDateStr = getSystemBusinessDate(transactionDate || businessDate);
 
     if (!supplierId || !transactionType || !fromAmount || !toAmount || !exchangeRate) {
       return NextResponse.json(
@@ -174,6 +179,9 @@ export async function POST(req: NextRequest) {
 
     // Execute atomic transaction with Row-Level Locks on Accounts and Inventory
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify that the business date is open and not frozen
+      await assertBusinessDateOpen(txnDateStr, tx);
+
       let cogsAmount = 0;
       let profitAmount = 0;
       let wacRate = 0;
@@ -216,6 +224,8 @@ export async function POST(req: NextRequest) {
         await postLedgerTransaction({
           entryType: `supplier_purchase_${tradedCurrency.toLowerCase()}`,
           referenceType: 'SupplierTransaction',
+          referenceId: transactionNumber,
+          entryDate: txnDateStr,
           description: `استلام ${dFrom.toNumber().toLocaleString()} ${tradedCurrency} من المورد ${supplier.name} في ${sdgSafe.name}`,
           createdBy: user.name,
           tx,
@@ -241,6 +251,8 @@ export async function POST(req: NextRequest) {
         await postLedgerTransaction({
           entryType: 'supplier_payment_egp',
           referenceType: 'SupplierTransaction',
+          referenceId: transactionNumber,
+          entryDate: txnDateStr,
           description: `سداد قيمة شراء عملة ${dTo.toNumber().toLocaleString()} EGP للمورد ${supplier.name} من ${lockedEgpSafe.name}`,
           createdBy: user.name,
           tx,
@@ -300,6 +312,8 @@ export async function POST(req: NextRequest) {
         await postLedgerTransaction({
           entryType: 'supplier_sale_revenue_egp',
           referenceType: 'SupplierTransaction',
+          referenceId: transactionNumber,
+          entryDate: txnDateStr,
           description: `استلام إيراد بيع عملة ${dTo.toNumber().toLocaleString()} EGP من المورد ${supplier.name} في ${egpSafe.name}`,
           createdBy: user.name,
           tx,
@@ -325,6 +339,8 @@ export async function POST(req: NextRequest) {
         await postLedgerTransaction({
           entryType: `supplier_sale_deliver_${tradedCurrency.toLowerCase()}`,
           referenceType: 'SupplierTransaction',
+          referenceId: transactionNumber,
+          entryDate: txnDateStr,
           description: `تسليم ${dFrom.toNumber().toLocaleString()} ${tradedCurrency} للمورد ${supplier.name} من ${lockedSdgSafe.name}`,
           createdBy: user.name,
           tx,
@@ -352,6 +368,8 @@ export async function POST(req: NextRequest) {
             await postLedgerTransaction({
               entryType: 'supplier_trade_profit',
               referenceType: 'SupplierTransaction',
+              referenceId: transactionNumber,
+              entryDate: txnDateStr,
               description: `تسجيل أرباح فروق أسعار بيع عملة (${profitAmount.toLocaleString()} EGP) من عملية ${transactionNumber}`,
               createdBy: user.name,
               tx,
@@ -378,6 +396,8 @@ export async function POST(req: NextRequest) {
             await postLedgerTransaction({
               entryType: 'supplier_trade_loss',
               referenceType: 'SupplierTransaction',
+              referenceId: transactionNumber,
+              entryDate: txnDateStr,
               description: `تسجيل خسائر فروق أسعار بيع عملة (${lossAmount.toLocaleString()} EGP) من عملية ${transactionNumber}`,
               createdBy: user.name,
               tx,

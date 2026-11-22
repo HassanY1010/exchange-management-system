@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { logAuditEvent } from '@/lib/audit';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import Decimal from 'decimal.js';
 
 /**
@@ -181,7 +182,11 @@ export async function POST(req: NextRequest) {
       parentAccountId,
       description,
       counterAccountId,
+      openingDate,
+      businessDate,
     } = body;
+
+    const accDateStr = getSystemBusinessDate(openingDate || businessDate);
 
     if (!name || !name.trim()) {
       return NextResponse.json({ error: 'اسم الصندوق أو الحساب مطلوب' }, { status: 400 });
@@ -246,6 +251,8 @@ export async function POST(req: NextRequest) {
 
       // 2. If Opening Balance > 0, post balanced opening ledger entry against Capital / Equity
       if (dOpening.greaterThan(0)) {
+        await assertBusinessDateOpen(accDateStr, tx);
+
         // Locate counter account (Capital account 3010 in same currency, or provided counter account)
         let counterAcc = counterAccountId
           ? await tx.account.findUnique({ where: { id: counterAccountId } })
@@ -281,6 +288,7 @@ export async function POST(req: NextRequest) {
           entryType: 'opening_balance',
           referenceType: 'Account',
           referenceId: newAcc.id,
+          entryDate: accDateStr,
           description: `قيد رصيد افتتاحي معتمد للصندوق/الحساب ${newAcc.name} بمبلغ ${dOpening.toNumber().toLocaleString()} ${cur}`,
           createdBy: user.name || user.email || user.userId || 'system',
           tx,

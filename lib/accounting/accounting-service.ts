@@ -1,5 +1,5 @@
 import { prisma } from '../db';
-import { validateDoubleEntry } from '../financial-core';
+import { validateDoubleEntry, getSystemBusinessDate } from '../financial-core';
 import { logAuditEvent } from '../audit';
 import Decimal from 'decimal.js';
 
@@ -22,14 +22,25 @@ export interface PostLedgerParams {
 
 /**
  * Asserts that the given businessDate is currently open for financial operations.
+ * Uses PostgreSQL transaction advisory lock to guarantee 100% atomicity against concurrent closings.
  * Throws an error if the business date is closed and frozen.
  */
 export async function assertBusinessDateOpen(businessDate: string, tx?: any) {
   if (!businessDate) return;
   const client = tx || prisma;
+
+  if (tx && typeof tx.$executeRawUnsafe === 'function') {
+    // Acquire a transaction-level advisory lock on this businessDate
+    await tx.$executeRawUnsafe(
+      `SELECT pg_advisory_xact_lock(hashtext('daily-closing:' || $1))`,
+      businessDate
+    );
+  }
+
   const closing = await client.dailyClosing.findUnique({
     where: { businessDate },
   });
+
   if (closing && closing.status === 'closed') {
     throw new Error(
       `اليوم المالي (${businessDate}) مغلق ومجمد رسمياً. يمنع تسجيل أو تعديل أي حركات مالية عليه إلا بعد إعادة فتحه بواسطة مدير النظام`
@@ -51,11 +62,11 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
     throw new Error(validation.errorMessage || 'القيد المحاسبي غير متوازن');
   }
 
-  const dateStr = params.entryDate || new Date().toISOString().split('T')[0];
+  const dateStr = params.entryDate || getSystemBusinessDate();
   const entryNumber = `JE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   const executeCore = async (tx: any) => {
-    // 0. Verify that the business date is open and not frozen
+    // 0. Verify that the business date is open and not frozen (with transaction-level concurrency lock)
     await assertBusinessDateOpen(dateStr, tx);
 
     // 1. Lock all affected accounts in deterministic sorted order before any inserts to eliminate deadlocks and race conditions

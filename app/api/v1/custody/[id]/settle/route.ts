@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -25,13 +25,16 @@ export async function POST(
     const result = await prisma.$transaction(async (tx) => {
       // 1. Lock EmployeeCustody
       const lockedCustodies = await tx.$queryRawUnsafe<any[]>(
-        'SELECT id, "currentAmount", "openingAmount", "status", "accountId", "employeeId", "currency" FROM "EmployeeCustody" WHERE id = $1 FOR UPDATE',
+        'SELECT id, "currentAmount", "openingAmount", "status", "accountId", "employeeId", "currency", "businessDate" FROM "EmployeeCustody" WHERE id = $1 FOR UPDATE',
         params.id
       );
       const lockedCustody = lockedCustodies[0];
       if (!lockedCustody) {
         throw new Error('سجل العهدة غير موجود');
       }
+
+      // Assert that the custody's business date is open and not frozen
+      await assertBusinessDateOpen(lockedCustody.businessDate, tx);
 
       if (lockedCustody.status === 'closed') {
         throw new Error('هذه العهدة مسواة ومغلقة بالفعل');
@@ -95,6 +98,7 @@ export async function POST(
           entryType: 'custody_return',
           referenceType: 'CustodyTransaction',
           referenceId: returnTxn.id,
+          entryDate: lockedCustody.businessDate,
           description: `تسوية وإرجاع متبقي عهدة ${employee?.name || 'الموظف'} (${returnedAmount.toLocaleString()} ${lockedCustody.currency}) إلى ${targetSafe.name}`,
           createdBy: user.name,
           tx,

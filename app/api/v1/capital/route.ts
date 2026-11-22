@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -130,7 +131,9 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { transactionType, accountId, amount, description } = body;
+    const { transactionType, accountId, amount, description, transactionDate, businessDate } = body;
+    const capitalDateStr = getSystemBusinessDate(transactionDate || businessDate);
+    await assertBusinessDateOpen(capitalDateStr);
 
     // 1. Validate Transaction Type
     const ALLOWED_TYPES = ['addition', 'initial_capital', 'withdrawal', 'personal_draw'];
@@ -180,6 +183,9 @@ export async function POST(req: NextRequest) {
 
     // 3. Execute atomic transaction with Row-Level Locks
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify that the business date is open and not frozen
+      await assertBusinessDateOpen(capitalDateStr, tx);
+
       // Find or auto-initialize Capital Account matching safe currency
       const capitalCode = cur === 'EGP' ? '3010' : `3010-${cur}`;
       let capitalAcc = await tx.account.findFirst({
@@ -246,6 +252,7 @@ export async function POST(req: NextRequest) {
       await postLedgerTransaction({
         entryType: isAddition ? 'capital_addition' : 'capital_withdrawal',
         referenceType: 'CapitalTransaction',
+        entryDate: capitalDateStr,
         description: desc,
         createdBy: user.name || user.email || user.userId || 'admin',
         tx,

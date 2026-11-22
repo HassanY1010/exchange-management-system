@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -87,9 +88,13 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     const dAmount = new Decimal(expense.amount.toString());
     const cur = expense.currency;
+    const expenseDateStr = getSystemBusinessDate(expense.expenseDate);
 
     // Execute atomic reversal
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify that the original business date of the expense is open and not frozen
+      await assertBusinessDateOpen(expenseDateStr, tx);
+
       // 1. Fetch paying account and expense account
       const safeAccount = await tx.account.findUnique({ where: { id: expense.accountId } });
       if (!safeAccount) {
@@ -130,7 +135,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         entryType: 'expense_reversal',
         referenceType: 'Expense',
         referenceId: expense.expenseNumber,
-        entryDate: new Date().toISOString().split('T')[0],
+        entryDate: expenseDateStr,
         description: cancelReason,
         createdBy: user.name || user.email || user.userId || 'system',
         tx,

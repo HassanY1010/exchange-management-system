@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { reconcileDailyClosing, ClosingAccountItem } from '@/lib/financial-core';
+import { reconcileDailyClosing, ClosingAccountItem, getSystemBusinessDate } from '@/lib/financial-core';
 import Decimal from 'decimal.js';
 
 export async function POST(req: NextRequest) {
@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const { businessDate, countedBalances } = body;
-    const dateStr = businessDate || new Date().toISOString().split('T')[0];
+    const dateStr = getSystemBusinessDate(businessDate);
 
     // 1. Check if the business day is already closed
     const existingClosing = await prisma.dailyClosing.findUnique({

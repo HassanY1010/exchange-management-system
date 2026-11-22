@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications/notification-service';
 import Decimal from 'decimal.js';
@@ -31,7 +31,7 @@ export async function POST(
     // 1. Fully Atomic Concurrency Lock, Validation, Ledger Posting & Voucher Issuance
     const result = await prisma.$transaction(async (tx) => {
       const lockedSessionRows = await tx.$queryRawUnsafe<any[]>(
-        'SELECT id, "status", "requestedAmount", "expectedAmount", "receivedAmount", "deliveredAmount", "exchangeRate", "customerId", "sessionNumber", "payoutIdempotencyKey", "overpaymentAmount", "overpaymentSettled" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+        'SELECT id, "status", "requestedAmount", "expectedAmount", "receivedAmount", "deliveredAmount", "exchangeRate", "customerId", "sessionNumber", "payoutIdempotencyKey", "overpaymentAmount", "overpaymentSettled", "businessDate" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
         params.id
       );
 
@@ -40,6 +40,9 @@ export async function POST(
       }
 
       const locked = lockedSessionRows[0];
+
+      // Assert that the session's business date is open and not frozen
+      await assertBusinessDateOpen(locked.businessDate, tx);
 
       // Idempotency: If request with same idempotencyKey was already fulfilled, return existing state
       if (idempotencyKey && locked.payoutIdempotencyKey === idempotencyKey && (locked.status === 'completed' || Number(locked.deliveredAmount) > 0)) {
@@ -147,6 +150,7 @@ export async function POST(
           entryType: 'currency_exchange_sdg_clear',
           referenceType: 'CustomerSession',
           referenceId: locked.id,
+          entryDate: locked.businessDate,
           description: `تسوية التزام العميل بالسوداني ${equivalentSdg.toLocaleString()} SDG لجلسة ${locked.sessionNumber}`,
           createdBy: user.name,
           tx,
@@ -174,6 +178,7 @@ export async function POST(
         entryType: 'customer_cash_delivery',
         referenceType: 'CustomerSession',
         referenceId: locked.id,
+        entryDate: locked.businessDate,
         description: `تسليم نقدي ${amountEgp.toLocaleString()} EGP للعميل ${customerName} (جلسة ${locked.sessionNumber})`,
         createdBy: user.name,
         tx,

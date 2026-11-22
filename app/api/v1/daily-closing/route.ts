@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { reconcileDailyClosing, ClosingAccountItem } from '@/lib/financial-core';
+import { reconcileDailyClosing, ClosingAccountItem, getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -58,10 +58,16 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const { businessDate, countedBalances, notes } = body;
-    const dateStr = businessDate || new Date().toISOString().split('T')[0];
+    const dateStr = getSystemBusinessDate(businessDate);
 
     // Atomic execution within a single Prisma Transaction
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Acquire exclusive transaction-level advisory lock on this businessDate
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtext('daily-closing:' || $1))`,
+        dateStr
+      );
+
       // 1. Concurrency Check: Check if already closed
       const existing = await tx.dailyClosing.findUnique({
         where: { businessDate: dateStr },
@@ -178,7 +184,40 @@ export async function POST(req: NextRequest) {
 
       const reconciliation = reconcileDailyClosing(dateStr, items);
 
-      // Preserve previous closing snapshot and reopen reasons if re-closing a reopened day
+      // Preserve full structured snapshot history in DB if re-closing a reopened day
+      let snapshotsHistory: any[] = [];
+      if (existing?.differences) {
+        try {
+          const parsedDiff = JSON.parse(existing.differences);
+          snapshotsHistory = Array.isArray(parsedDiff.snapshotsHistory) ? parsedDiff.snapshotsHistory : [];
+        } catch {}
+      }
+
+      if (existing?.status === 'reopened' || existing?.closedAt) {
+        let prevOpening = null;
+        let prevExpected = null;
+        let prevActual = null;
+        let prevDiff = null;
+        try { prevOpening = JSON.parse(existing.openingBalances); } catch {}
+        try { prevExpected = JSON.parse(existing.expectedBalances); } catch {}
+        try { prevActual = JSON.parse(existing.actualBalances); } catch {}
+        try { prevDiff = JSON.parse(existing.differences); } catch {}
+
+        snapshotsHistory.push({
+          snapshotIndex: snapshotsHistory.length + 1,
+          closedAt: existing.closedAt ? existing.closedAt.toISOString() : null,
+          closedBy: existing.closedBy || null,
+          reopenedAt: existing.reopenedAt ? existing.reopenedAt.toISOString() : null,
+          reopenedBy: existing.reopenedBy || null,
+          openingBalances: prevOpening,
+          expectedBalances: prevExpected,
+          actualBalances: prevActual,
+          differences: prevDiff?.items || null,
+          byCurrency: prevDiff?.byCurrency || null,
+          notes: existing.notes || null,
+        });
+      }
+
       let historicalNotes = notes || '';
       if (existing?.notes) {
         historicalNotes = historicalNotes ? `${existing.notes} | ${historicalNotes}` : existing.notes;
@@ -220,6 +259,7 @@ export async function POST(req: NextRequest) {
             hasVariances: reconciliation.hasVariances,
             byCurrency: reconciliation.byCurrency,
             items: reconciliation.accounts,
+            snapshotsHistory,
           }),
           notes: historicalNotes,
           closedBy: user.name || user.email || user.userId,
@@ -255,6 +295,7 @@ export async function POST(req: NextRequest) {
             hasVariances: reconciliation.hasVariances,
             byCurrency: reconciliation.byCurrency,
             items: reconciliation.accounts,
+            snapshotsHistory,
           }),
           notes: historicalNotes,
           closedBy: user.name || user.email || user.userId,

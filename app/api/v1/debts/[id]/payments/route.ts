@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -99,11 +100,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ error: 'لا يمكن استخدام حسابات الوساطة المعلقة للسداد' }, { status: 400 });
     }
 
-    const payDate = paymentDate || new Date().toISOString().split('T')[0];
+    const payDate = getSystemBusinessDate(paymentDate);
     await assertBusinessDateOpen(payDate);
 
     // 3. Execute Atomic Transaction with Row-Level Locks
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify that the business date is open and not frozen
+      await assertBusinessDateOpen(payDate, tx);
+
       // Find debt with lock
       const debt = await tx.debt.findFirst({
         where: { OR: [{ id }, { debtNumber: id }] },

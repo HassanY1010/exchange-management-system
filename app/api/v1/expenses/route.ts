@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -178,12 +179,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const dateStr = expenseDate || new Date().toISOString().split('T')[0];
+    const dateStr = getSystemBusinessDate(expenseDate);
     await assertBusinessDateOpen(dateStr);
     const desc = description?.trim() || `مصروف تشغيلي: ${category.name}`;
 
     // 4. Execute atomic transaction with Row-Level Locks and Double-Entry Ledger Posting
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify that the business date is open and not frozen
+      await assertBusinessDateOpen(dateStr, tx);
+
       // Find or auto-initialize currency-matched Expense Account (Class 5xxx)
       const expenseCode = cur === 'EGP' ? '5010' : `5010-${cur}`;
       let expenseAcc = await tx.account.findFirst({

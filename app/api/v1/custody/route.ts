@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -146,11 +147,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const bDate = businessDate || new Date().toISOString().split('T')[0];
+    const bDate = getSystemBusinessDate(businessDate);
     await assertBusinessDateOpen(bDate);
 
     // Fully Atomic Execution within a single Prisma Transaction
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify that the business date is open and not frozen
+      await assertBusinessDateOpen(bDate, tx);
+
       // 1. Row-level lock on source safe account to prevent overdraft and race conditions
       const lockedSafeRows = await tx.$queryRawUnsafe<any[]>(
         'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance" FROM "Account" WHERE id = $1 FOR UPDATE',
@@ -220,6 +224,7 @@ export async function POST(req: NextRequest) {
         entryType: 'custody_issuance',
         referenceType: 'EmployeeCustody',
         referenceId: custody.id,
+        entryDate: bDate,
         description: `تسليم عهدة نقدية للموظف ${employee.name} بمبلغ ${dAmount.toFixed(2)} ${currency} من ${lockedSafe.name}${notes ? ` (${notes})` : ''}`,
         createdBy: user.name,
         tx,

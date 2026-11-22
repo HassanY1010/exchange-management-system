@@ -3,6 +3,25 @@ import Decimal from 'decimal.js';
 // Configure Decimal precision
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
+/**
+ * Returns the operational business date formatted as YYYY-MM-DD
+ * in the configured system timezone (defaults to Africa/Cairo).
+ * Guarantees zero displacement between Render UTC servers and local operational business time.
+ */
+export function getSystemBusinessDate(
+  inputDate?: Date | string | null,
+  timeZone: string = 'Africa/Cairo'
+): string {
+  if (inputDate && typeof inputDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(inputDate)) {
+    return inputDate;
+  }
+  const d = inputDate ? (typeof inputDate === 'string' ? new Date(inputDate) : inputDate) : new Date();
+  if (isNaN(d.getTime())) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+  }
+  return new Intl.DateTimeFormat('en-CA', { timeZone }).format(d);
+}
+
 export interface ExchangeCalculationInput {
   amount: number | string;
   rate: number | string;

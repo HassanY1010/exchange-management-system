@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -75,7 +76,11 @@ export async function POST(req: NextRequest) {
       exchangeRate,
       feeAmount = 0,
       description,
+      transferDate,
+      businessDate,
     } = body;
+
+    const transferDateStr = getSystemBusinessDate(transferDate || businessDate);
 
     const dAmount = new Decimal(amount || 0);
     const dFee = new Decimal(feeAmount || 0);
@@ -101,6 +106,9 @@ export async function POST(req: NextRequest) {
 
     // Execute atomic transfer with Row-Level Locks
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify that the business date is open and not frozen
+      await assertBusinessDateOpen(transferDateStr, tx);
+
       // 1. Lock accounts in deterministic sorted order to completely prevent deadlocks
       const sortedIds = [fromAccountId, toAccountId].sort();
       const lockedRowsFirst = (await tx.$queryRawUnsafe(
@@ -153,6 +161,7 @@ export async function POST(req: NextRequest) {
           entryType: 'fund_transfer',
           referenceType: 'AccountTransfer',
           referenceId: transferNumber,
+          entryDate: transferDateStr,
           description: descText,
           createdBy: user.name || user.email || user.userId || 'system',
           tx,
@@ -272,6 +281,7 @@ export async function POST(req: NextRequest) {
           entryType: 'fund_transfer_cross_from',
           referenceType: 'AccountTransfer',
           referenceId: transferNumber,
+          entryDate: transferDateStr,
           description: `خصم تحويل عملة من ${fromAcc.name} (${dAmount.toNumber().toLocaleString()} ${fromAcc.currency})`,
           createdBy: user.name || user.email || user.userId || 'system',
           tx,
@@ -298,6 +308,7 @@ export async function POST(req: NextRequest) {
           entryType: 'fund_transfer_cross_to',
           referenceType: 'AccountTransfer',
           referenceId: transferNumber,
+          entryDate: transferDateStr,
           description: `إيداع تحويل عملة في ${toAcc.name} (${finalToAmount.toNumber().toLocaleString()} ${toAcc.currency})`,
           createdBy: user.name || user.email || user.userId || 'system',
           tx,

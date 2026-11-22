@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -205,8 +206,8 @@ export async function POST(req: NextRequest) {
 
     const count = await prisma.debt.count();
     const debtNumber = `DEBT-${Date.now()}-${count + 1}`;
-    const debtDate = new Date().toISOString().split('T')[0];
-    await assertBusinessDateOpen(debtDate);
+    const debtDateStr = getSystemBusinessDate(body.debtDate || body.businessDate);
+    await assertBusinessDateOpen(debtDateStr);
     const desc =
       description?.trim() ||
       (isReceivable
@@ -215,6 +216,9 @@ export async function POST(req: NextRequest) {
 
     // 2. Execute Transaction
     const result = await prisma.$transaction(async (tx) => {
+      // 0. Verify that the business date is open and not frozen
+      await assertBusinessDateOpen(debtDateStr, tx);
+
       let ledgerEntry = null;
 
       // If initial funding / safe disbursement is requested
@@ -288,6 +292,7 @@ export async function POST(req: NextRequest) {
             entryType: 'debt_origination',
             referenceType: 'Debt',
             referenceId: debtNumber,
+            entryDate: debtDateStr,
             description: `إثبات وصرف دين نقدي: ${desc}`,
             createdBy: user.name || user.email || user.userId || 'system',
             tx,
@@ -314,6 +319,7 @@ export async function POST(req: NextRequest) {
             entryType: 'debt_origination',
             referenceType: 'Debt',
             referenceId: debtNumber,
+            entryDate: debtDateStr,
             description: `إثبات واستلام التزام نقدي: ${desc}`,
             createdBy: user.name || user.email || user.userId || 'system',
             tx,
@@ -348,7 +354,7 @@ export async function POST(req: NextRequest) {
           currency: cur,
           originalAmount: dAmount.toNumber(),
           remainingAmount: dAmount.toNumber(),
-          debtDate,
+          debtDate: debtDateStr,
           dueDate: dueDate || null,
           description: desc,
           status: 'outstanding',

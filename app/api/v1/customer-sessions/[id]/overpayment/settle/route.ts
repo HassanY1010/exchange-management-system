@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications/notification-service';
 import Decimal from 'decimal.js';
@@ -27,7 +27,7 @@ export async function POST(
 
     const result = await prisma.$transaction(async (tx) => {
       const lockedRows = (await tx.$queryRawUnsafe(
-        'SELECT id, "overpaymentAmount", "overpaymentSettled", "sessionNumber", "customerId", "requestedAmount", "expectedAmount", "receivedAmount", "deliveredAmount", "status" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+        'SELECT id, "overpaymentAmount", "overpaymentSettled", "sessionNumber", "customerId", "requestedAmount", "expectedAmount", "receivedAmount", "deliveredAmount", "status", "businessDate" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
         params.id
       )) as any[];
 
@@ -36,6 +36,9 @@ export async function POST(
       }
 
       const locked = lockedRows[0];
+
+      // Assert that the session's business date is open and not frozen
+      await assertBusinessDateOpen(locked.businessDate, tx);
 
       if (locked.overpaymentSettled) {
         throw new Error('تمت تسوية فائض السداد لهذه الجلسة مسبقاً ولا يمكن تكرار التسوية');
@@ -64,6 +67,7 @@ export async function POST(
           entryType: 'overpayment_refund',
           referenceType: 'CustomerSession',
           referenceId: locked.id,
+          entryDate: locked.businessDate,
           description: `استرداد فائض سداد ${overpaymentNum.toLocaleString()} SDG للعميل ${customerName} (جلسة ${locked.sessionNumber})`,
           createdBy: user.name,
           tx,
@@ -90,6 +94,7 @@ export async function POST(
           entryType: 'overpayment_to_customer_credit',
           referenceType: 'CustomerSession',
           referenceId: locked.id,
+          entryDate: locked.businessDate,
           description: `ترحيل فائض سداد ${overpaymentNum.toLocaleString()} SDG إلى رصيد دائن مستحق للعميل ${customerName}`,
           createdBy: user.name,
           tx,

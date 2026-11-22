@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
-import { calculateSessionBalance } from '@/lib/financial-core';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { calculateSessionBalance, getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications/notification-service';
 
@@ -45,7 +45,7 @@ export async function POST(
       let currentSession: any = null;
       if (locked[0].customerSessionId) {
         const lockedSessions = await tx.$queryRawUnsafe<any[]>(
-          'SELECT id, "status", "requestedAmount", "receivedAmount", "deliveredAmount", "exchangeRate", "overpaymentSettled", "sessionNumber" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+          'SELECT id, "status", "requestedAmount", "receivedAmount", "deliveredAmount", "exchangeRate", "overpaymentSettled", "sessionNumber", "businessDate" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
           locked[0].customerSessionId
         );
         if (lockedSessions && lockedSessions.length > 0) {
@@ -55,6 +55,10 @@ export async function POST(
           }
         }
       }
+
+      // Assert that the business date is open and not frozen
+      const receiptBusinessDate = currentSession?.businessDate || getSystemBusinessDate();
+      await assertBusinessDateOpen(receiptBusinessDate, tx);
 
       // Enforce Verified State prior to Financial Approval (or Admin direct dual-verification)
       if (locked[0].status !== 'verified' && !directVerification && user.role !== 'admin') {
@@ -101,6 +105,7 @@ export async function POST(
         entryType: 'bankak_receipt',
         referenceType: 'BankakReceipt',
         referenceId: updatedReceipt.id,
+        entryDate: receiptBusinessDate,
         description: `استلام إشعار بنكك رقم ${updatedReceipt.transactionId} بمبلغ ${receiptAmount.toLocaleString()} SDG للعميل ${updatedReceipt.customer?.name || 'عام'}`,
         createdBy: user.name,
         tx,

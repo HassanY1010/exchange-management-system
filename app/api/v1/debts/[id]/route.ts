@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
+import { getSystemBusinessDate } from '@/lib/financial-core';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -118,6 +119,9 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         { status: 400 }
       );
     }
+
+    const debtDateStr = getSystemBusinessDate(debt.createdAt);
+    await assertBusinessDateOpen(debtDateStr);
 
     // Update status to cancelled
     const updatedDebt = await prisma.debt.update({
