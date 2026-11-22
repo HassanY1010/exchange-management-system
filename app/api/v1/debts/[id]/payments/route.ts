@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -100,6 +100,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     const payDate = paymentDate || new Date().toISOString().split('T')[0];
+    await assertBusinessDateOpen(payDate);
 
     // 3. Execute Atomic Transaction with Row-Level Locks
     const result = await prisma.$transaction(async (tx) => {

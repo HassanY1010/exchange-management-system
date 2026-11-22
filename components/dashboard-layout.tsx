@@ -11,7 +11,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 w-full">
       {/* Sidebar: persistent on desktop, drawer on mobile */}
-      <div className="no-print h-full">
+      <div className="no-print h-full shrink-0 flex flex-col">
         <Sidebar mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
       </div>
 

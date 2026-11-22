@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -147,6 +147,7 @@ export async function POST(req: NextRequest) {
     }
 
     const bDate = businessDate || new Date().toISOString().split('T')[0];
+    await assertBusinessDateOpen(bDate);
 
     // Fully Atomic Execution within a single Prisma Transaction
     const result = await prisma.$transaction(async (tx) => {

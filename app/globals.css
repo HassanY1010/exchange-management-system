@@ -66,9 +66,35 @@ body {
   padding-top: env(safe-area-inset-top, 0px);
 }
 
-/* Touch scrolling */
+/* Touch scrolling & Scrollbar customizations */
 .touch-scroll {
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #0f172a;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+  border: 1px solid #1e293b;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 
 /* Mobile Input font size to prevent iOS zoom */

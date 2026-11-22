@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -179,6 +179,7 @@ export async function POST(req: NextRequest) {
     }
 
     const dateStr = expenseDate || new Date().toISOString().split('T')[0];
+    await assertBusinessDateOpen(dateStr);
     const desc = description?.trim() || `مصروف تشغيلي: ${category.name}`;
 
     // 4. Execute atomic transaction with Row-Level Locks and Double-Entry Ledger Posting

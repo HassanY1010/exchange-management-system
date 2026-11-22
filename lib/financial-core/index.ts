@@ -400,6 +400,8 @@ export function calculateWeightedAverageCost(batches: PurchaseBatch[]): CostingR
 export interface ClosingAccountItem {
   accountId: string;
   accountName: string;
+  accountCode?: string;
+  accountType?: string;
   currency: string;
   openingBalance: number;
   totalInflow: number;
@@ -414,9 +416,23 @@ export interface ClosingAccountReport extends ClosingAccountItem {
   status: 'exact' | 'surplus' | 'deficit'; // مطابق / فائض / عجز
 }
 
+export interface CurrencyClosingSummary {
+  currency: string;
+  totalOpening: number;
+  totalInflow: number;
+  totalOutflow: number;
+  totalExpected: number;
+  totalActual: number;
+  totalDiff: number;
+  isBalanced: boolean;
+  status: 'exact' | 'surplus' | 'deficit';
+  accountsCount: number;
+}
+
 export interface DailyClosingSummary {
   businessDate: string;
   accounts: ClosingAccountReport[];
+  byCurrency: Record<string, CurrencyClosingSummary>;
   totalExpectedEgp: number;
   totalActualEgp: number;
   totalDiffEgp: number;
@@ -431,52 +447,105 @@ export function reconcileDailyClosing(
   items: ClosingAccountItem[]
 ): DailyClosingSummary {
   const reports: ClosingAccountReport[] = [];
-  let totalExpEgp = new Decimal(0);
-  let totalActEgp = new Decimal(0);
-  let totalExpSdg = new Decimal(0);
-  let totalActSdg = new Decimal(0);
+  const currencyTotals: Record<string, {
+    totalOpening: Decimal;
+    totalInflow: Decimal;
+    totalOutflow: Decimal;
+    totalExpected: Decimal;
+    totalActual: Decimal;
+    totalDiff: Decimal;
+    accountsCount: number;
+  }> = {};
 
   for (const item of items) {
+    const cur = item.currency ? item.currency.toUpperCase() : 'EGP';
+    const dOpening = new Decimal(item.openingBalance || 0);
+    const dInflow = new Decimal(item.totalInflow || 0);
+    const dOutflow = new Decimal(item.totalOutflow || 0);
     const dExpected = new Decimal(item.expectedBalance || 0);
-    const dActual = new Decimal(item.actualCountedBalance || 0);
+    const dActual = new Decimal(item.actualCountedBalance !== undefined && item.actualCountedBalance !== null ? item.actualCountedBalance : dExpected);
     const diff = dActual.minus(dExpected);
-    const isBalanced = diff.abs().lessThanOrEqualTo(0.01);
+    const isBalanced = diff.abs().lessThanOrEqualTo(0.0001);
 
     let status: ClosingAccountReport['status'] = 'exact';
     if (!isBalanced) {
       status = diff.isPositive() ? 'surplus' : 'deficit';
     }
 
-    if (item.currency === 'EGP') {
-      totalExpEgp = totalExpEgp.plus(dExpected);
-      totalActEgp = totalActEgp.plus(dActual);
-    } else if (item.currency === 'SDG') {
-      totalExpSdg = totalExpSdg.plus(dExpected);
-      totalActSdg = totalActSdg.plus(dActual);
+    if (!currencyTotals[cur]) {
+      currencyTotals[cur] = {
+        totalOpening: new Decimal(0),
+        totalInflow: new Decimal(0),
+        totalOutflow: new Decimal(0),
+        totalExpected: new Decimal(0),
+        totalActual: new Decimal(0),
+        totalDiff: new Decimal(0),
+        accountsCount: 0,
+      };
     }
+
+    currencyTotals[cur].totalOpening = currencyTotals[cur].totalOpening.plus(dOpening);
+    currencyTotals[cur].totalInflow = currencyTotals[cur].totalInflow.plus(dInflow);
+    currencyTotals[cur].totalOutflow = currencyTotals[cur].totalOutflow.plus(dOutflow);
+    currencyTotals[cur].totalExpected = currencyTotals[cur].totalExpected.plus(dExpected);
+    currencyTotals[cur].totalActual = currencyTotals[cur].totalActual.plus(dActual);
+    currencyTotals[cur].totalDiff = currencyTotals[cur].totalDiff.plus(diff);
+    currencyTotals[cur].accountsCount += 1;
 
     reports.push({
       ...item,
-      difference: diff.toDecimalPlaces(2).toNumber(),
+      currency: cur,
+      openingBalance: dOpening.toNumber(),
+      totalInflow: dInflow.toNumber(),
+      totalOutflow: dOutflow.toNumber(),
+      expectedBalance: dExpected.toNumber(),
+      actualCountedBalance: dActual.toNumber(),
+      difference: diff.toDecimalPlaces(4).toNumber(),
       isBalanced,
       status,
     });
   }
 
-  const diffEgp = totalActEgp.minus(totalExpEgp);
-  const diffSdg = totalActSdg.minus(totalExpSdg);
+  const byCurrency: Record<string, CurrencyClosingSummary> = {};
+  for (const [cur, totals] of Object.entries(currencyTotals)) {
+    const isCurBalanced = totals.totalDiff.abs().lessThanOrEqualTo(0.0001);
+    byCurrency[cur] = {
+      currency: cur,
+      totalOpening: totals.totalOpening.toDecimalPlaces(4).toNumber(),
+      totalInflow: totals.totalInflow.toDecimalPlaces(4).toNumber(),
+      totalOutflow: totals.totalOutflow.toDecimalPlaces(4).toNumber(),
+      totalExpected: totals.totalExpected.toDecimalPlaces(4).toNumber(),
+      totalActual: totals.totalActual.toDecimalPlaces(4).toNumber(),
+      totalDiff: totals.totalDiff.toDecimalPlaces(4).toNumber(),
+      isBalanced: isCurBalanced,
+      status: isCurBalanced ? 'exact' : totals.totalDiff.isPositive() ? 'surplus' : 'deficit',
+      accountsCount: totals.accountsCount,
+    };
+  }
+
+  const egpTotals = currencyTotals['EGP'] || {
+    totalExpected: new Decimal(0),
+    totalActual: new Decimal(0),
+    totalDiff: new Decimal(0),
+  };
+  const sdgTotals = currencyTotals['SDG'] || {
+    totalExpected: new Decimal(0),
+    totalActual: new Decimal(0),
+    totalDiff: new Decimal(0),
+  };
 
   const hasVariances = reports.some((r) => !r.isBalanced);
 
   return {
     businessDate,
     accounts: reports,
-    totalExpectedEgp: totalExpEgp.toDecimalPlaces(2).toNumber(),
-    totalActualEgp: totalActEgp.toDecimalPlaces(2).toNumber(),
-    totalDiffEgp: diffEgp.toDecimalPlaces(2).toNumber(),
-    totalExpectedSdg: totalExpSdg.toDecimalPlaces(2).toNumber(),
-    totalActualSdg: totalActSdg.toDecimalPlaces(2).toNumber(),
-    totalDiffSdg: diffSdg.toDecimalPlaces(2).toNumber(),
+    byCurrency,
+    totalExpectedEgp: egpTotals.totalExpected.toDecimalPlaces(2).toNumber(),
+    totalActualEgp: egpTotals.totalActual.toDecimalPlaces(2).toNumber(),
+    totalDiffEgp: egpTotals.totalDiff.toDecimalPlaces(2).toNumber(),
+    totalExpectedSdg: sdgTotals.totalExpected.toDecimalPlaces(2).toNumber(),
+    totalActualSdg: sdgTotals.totalActual.toDecimalPlaces(2).toNumber(),
+    totalDiffSdg: sdgTotals.totalDiff.toDecimalPlaces(2).toNumber(),
     hasVariances,
   };
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
-import { postLedgerTransaction } from '@/lib/accounting/accounting-service';
+import { postLedgerTransaction, assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
 import Decimal from 'decimal.js';
 
@@ -206,6 +206,7 @@ export async function POST(req: NextRequest) {
     const count = await prisma.debt.count();
     const debtNumber = `DEBT-${Date.now()}-${count + 1}`;
     const debtDate = new Date().toISOString().split('T')[0];
+    await assertBusinessDateOpen(debtDate);
     const desc =
       description?.trim() ||
       (isReceivable

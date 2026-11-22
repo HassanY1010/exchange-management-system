@@ -55,9 +55,9 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   };
 
   const navContent = (
-    <div className="flex flex-col h-full bg-slate-900 text-white select-none">
+    <div className="flex flex-col h-full w-full min-h-0 bg-slate-900 text-white select-none overflow-hidden">
       {/* Brand Header */}
-      <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+      <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
         <div className="flex items-center space-x-3 space-x-reverse min-w-0">
           <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-md shadow-blue-500/20 shrink-0">
             <ArrowLeftRight className="w-5 h-5 text-white" />
@@ -82,7 +82,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
       </div>
 
       {/* Navigation List */}
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto touch-scroll">
+      <nav className="flex-1 min-h-0 p-3 space-y-1 overflow-y-auto overscroll-contain touch-scroll custom-scrollbar">
         {menuItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
           const Icon = item.icon;
@@ -106,7 +106,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
       </nav>
 
       {/* Footer Info with safe area */}
-      <div className="p-4 border-t border-slate-800 text-xs text-slate-400 flex flex-col space-y-1 safe-area-pb">
+      <div className="p-4 border-t border-slate-800 text-xs text-slate-400 flex flex-col space-y-1 safe-area-pb shrink-0">
         <div className="flex items-center justify-between text-slate-400">
           <span>نظام الإنتاج المالي</span>
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -119,7 +119,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   return (
     <>
       {/* 1. Desktop Persistent Sidebar */}
-      <aside className="hidden lg:flex w-64 min-h-screen flex-col shadow-xl z-20 shrink-0">
+      <aside className="hidden lg:flex w-64 h-full max-h-screen flex-col shadow-xl z-20 shrink-0 overflow-hidden">
         {navContent}
       </aside>
 
@@ -132,7 +132,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
         />
       )}
       <aside
-        className={`lg:hidden fixed top-0 bottom-0 right-0 z-50 w-72 max-w-[85vw] shadow-2xl transition-transform duration-300 ease-in-out ${
+        className={`lg:hidden fixed inset-y-0 right-0 z-50 w-72 max-w-[85vw] h-full max-h-screen shadow-2xl transition-transform duration-300 ease-in-out overflow-hidden flex flex-col ${
           mobileOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >

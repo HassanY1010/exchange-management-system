@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { calculateExchange } from '@/lib/financial-core';
+import { assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { logAuditEvent } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications/notification-service';
 
@@ -84,6 +85,7 @@ export async function POST(req: NextRequest) {
 
     const calc = calculateExchange(numRequested, numRate, 'EGP_TO_SDG');
     const bDate = businessDate || new Date().toISOString().split('T')[0];
+    await assertBusinessDateOpen(bDate);
     const cleanDate = bDate.replace(/-/g, '');
     const prefix = `SES-${cleanDate}-`;
 

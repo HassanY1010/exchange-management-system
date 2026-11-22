@@ -21,6 +21,23 @@ export interface PostLedgerParams {
 }
 
 /**
+ * Asserts that the given businessDate is currently open for financial operations.
+ * Throws an error if the business date is closed and frozen.
+ */
+export async function assertBusinessDateOpen(businessDate: string, tx?: any) {
+  if (!businessDate) return;
+  const client = tx || prisma;
+  const closing = await client.dailyClosing.findUnique({
+    where: { businessDate },
+  });
+  if (closing && closing.status === 'closed') {
+    throw new Error(
+      `اليوم المالي (${businessDate}) مغلق ومجمد رسمياً. يمنع تسجيل أو تعديل أي حركات مالية عليه إلا بعد إعادة فتحه بواسطة مدير النظام`
+    );
+  }
+}
+
+/**
  * Executes an atomic financial transaction:
  * 1. Validates double-entry (Total Debit == Total Credit)
  * 2. Writes LedgerEntry and LedgerLines
@@ -38,6 +55,9 @@ export async function postLedgerTransaction(params: PostLedgerParams) {
   const entryNumber = `JE-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
   const executeCore = async (tx: any) => {
+    // 0. Verify that the business date is open and not frozen
+    await assertBusinessDateOpen(dateStr, tx);
+
     // 1. Lock all affected accounts in deterministic sorted order before any inserts to eliminate deadlocks and race conditions
     const uniqueAccountIds = Array.from(new Set(params.lines.map((l) => l.accountId))).sort();
     const lockedAccountsMap = new Map<string, any>();

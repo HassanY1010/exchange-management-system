@@ -11,49 +11,67 @@ export async function POST(
   if (!user) return authError();
 
   if (user.role !== 'admin') {
-    return NextResponse.json({ error: 'صلاحية إعادة فتح اليوم مخصصة لمدير النظام فقط' }, { status: 403 });
+    return NextResponse.json({ error: 'صلاحية إعادة فتح اليوم المالي مخصصة لمدير النظام فقط' }, { status: 403 });
+  }
+
+  const { id } = params;
+  if (!id) {
+    return NextResponse.json({ error: 'معرف سجل الإغلاق مطلوب' }, { status: 400 });
   }
 
   try {
-    const { reason } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { reason } = body;
     if (!reason || reason.trim().length < 5) {
-      return NextResponse.json({ error: 'يجب تقديم سبب تفصيلي لإعادة فتح اليوم المالي' }, { status: 400 });
+      return NextResponse.json({ error: 'يجب تقديم سبب تفصيلي لإعادة فتح اليوم المالي (5 أحرف على الأقل)' }, { status: 400 });
     }
 
-    const closing = await prisma.dailyClosing.findUnique({
-      where: { id: params.id },
-    });
+    const result = await prisma.$transaction(async (tx) => {
+      const closing = await tx.dailyClosing.findFirst({
+        where: { OR: [{ id }, { businessDate: id }] },
+      });
 
-    if (!closing) {
-      return NextResponse.json({ error: 'سجل الإغلاق غير موجود' }, { status: 404 });
-    }
+      if (!closing) {
+        throw new Error('سجل الإغلاق غير موجود');
+      }
 
-    const updated = await prisma.dailyClosing.update({
-      where: { id: params.id },
-      data: {
-        status: 'reopened',
-        reopenedBy: user.name,
-        reopenedAt: new Date(),
-        notes: `${closing.notes || ''} [أعيد فتحه بواسطة ${user.name}: ${reason}]`,
-      },
-    });
+      if (closing.status === 'reopened') {
+        throw new Error(`اليوم المالي ${closing.businessDate} مفتوح بالفعل مسبقاً`);
+      }
 
-    await logAuditEvent({
-      userId: user.userId,
-      action: 'REOPEN_DAILY_CLOSING',
-      entityType: 'DailyClosing',
-      entityId: closing.id,
-      oldValues: { status: 'closed' },
-      newValues: { status: 'reopened' },
-      reason: `إعادة فتح اليوم المالي ${closing.businessDate}: ${reason}`,
+      const timestamp = new Date().toISOString();
+      const updatedNotes = `${closing.notes || ''} [أعيد فتحه بواسطة ${user.name || user.email}: ${reason.trim()} في ${timestamp}]`;
+
+      const updated = await tx.dailyClosing.update({
+        where: { id: closing.id },
+        data: {
+          status: 'reopened',
+          reopenedBy: user.name || user.email || user.userId,
+          reopenedAt: new Date(),
+          notes: updatedNotes,
+        },
+      });
+
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'REOPEN_DAILY_CLOSING',
+        entityType: 'DailyClosing',
+        entityId: closing.id,
+        oldValues: { status: 'closed', closedAt: closing.closedAt },
+        newValues: { status: 'reopened', reopenedAt: updated.reopenedAt, reason: reason.trim() },
+        reason: `إعادة فتح اليوم المالي ${closing.businessDate}: ${reason.trim()}`,
+        tx,
+      });
+
+      return updated;
     });
 
     return NextResponse.json({
       success: true,
-      message: 'تمت إعادة فتح اليوم المالي بنجاح وتسجيل السبب في سجل التدقيق',
-      data: updated,
+      message: `تمت إعادة فتح اليوم المالي (${result.businessDate}) بنجاح وتوثيق السبب في سجل التدقيق`,
+      data: result,
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'خطأ في إعادة فتح اليوم' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'خطأ أثناء إعادة فتح اليوم المالي' }, { status: 400 });
   }
 }
