@@ -3,9 +3,9 @@ import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 
 /**
- * Calculates start of day in the configured timezone (e.g. Africa/Cairo)
+ * Calculates start of day in the configured timezone (e.g. Asia/Aden)
  */
-function getStartOfDayForTimezone(tz: string = 'Africa/Cairo'): { todayStr: string; startOfDay: Date } {
+function getStartOfDayForTimezone(tz: string = 'Asia/Aden'): { todayStr: string; startOfDay: Date } {
   try {
     const formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: tz,
@@ -36,9 +36,9 @@ export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
-  // Resolve configured timezone
+  // Resolve configured timezone (defaults to Asia/Aden for Yemen UTC+3)
   const tzSetting = await prisma.setting.findUnique({ where: { key: 'timezone' } }).catch(() => null);
-  const timeZone = tzSetting?.value || 'Africa/Cairo';
+  const timeZone = tzSetting?.value || 'Asia/Aden';
   const { todayStr, startOfDay } = getStartOfDayForTimezone(timeZone);
 
   // 1. Fetch Accounts

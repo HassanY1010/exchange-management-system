@@ -5,12 +5,12 @@ Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
 /**
  * Returns the operational business date formatted as YYYY-MM-DD
- * in the configured system timezone (defaults to Africa/Cairo).
- * Guarantees zero displacement between Render UTC servers and local operational business time.
+ * in the configured system timezone (defaults to Asia/Aden - Yemen UTC+3).
+ * Guarantees zero displacement between Render UTC servers and local operational business time in Yemen.
  */
 export function getSystemBusinessDate(
   inputDate?: Date | string | null,
-  timeZone: string = 'Africa/Cairo'
+  timeZone: string = 'Asia/Aden'
 ): string {
   if (inputDate && typeof inputDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(inputDate)) {
     return inputDate;
