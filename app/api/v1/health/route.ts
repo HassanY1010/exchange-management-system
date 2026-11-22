@@ -30,3 +30,7 @@ export async function GET() {
     { status: isHealthy ? 200 : 503 }
   );
 }
+
+export async function HEAD() {
+  return new Response(null, { status: 200 });
+}
