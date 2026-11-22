@@ -468,6 +468,12 @@ export async function getBalanceSheetReport(params: {
       difference: new Decimal(0),
     };
 
+    const fiscalYearStart = `${asOfDate.split('-')[0]}-01-01`;
+    let priorRetainedEarnings = new Decimal(0);
+    let openingAssetsSum = new Decimal(0);
+    let openingLiabSum = new Decimal(0);
+    let openingCapSum = new Decimal(0);
+
     for (const acc of accounts) {
       const hasCurrencyLines = acc.ledgerLines.some((l) => l.currency === cur);
       if (acc.currency !== cur && !hasCurrencyLines) continue;
@@ -482,12 +488,35 @@ export async function getBalanceSheetReport(params: {
         ? new Decimal(acc.openingBalance.toString())
         : new Decimal(0);
 
+      // Track unjournalized initial balances for Opening Balance Equity reconciliation
+      if (isPrimaryAccountForCurrency && !hasOpeningLedgerEntry) {
+        if (accClass === '1') openingAssetsSum = openingAssetsSum.plus(baseOpening);
+        if (accClass === '2') openingLiabSum = openingLiabSum.plus(baseOpening);
+        if (accClass === '3') openingCapSum = openingCapSum.plus(baseOpening);
+      }
+
       let sumDebit = new Decimal(0);
       let sumCredit = new Decimal(0);
+      let currentPeriodDebit = new Decimal(0);
+      let currentPeriodCredit = new Decimal(0);
+      let priorPeriodDebit = new Decimal(0);
+      let priorPeriodCredit = new Decimal(0);
+
       for (const line of acc.ledgerLines) {
         if (line.currency !== cur) continue;
-        sumDebit = sumDebit.plus(new Decimal(line.debit.toString()));
-        sumCredit = sumCredit.plus(new Decimal(line.credit.toString()));
+        const d = new Decimal(line.debit.toString());
+        const c = new Decimal(line.credit.toString());
+        sumDebit = sumDebit.plus(d);
+        sumCredit = sumCredit.plus(c);
+
+        const entryDate = line.ledgerEntry.entryDate;
+        if (entryDate < fiscalYearStart) {
+          priorPeriodDebit = priorPeriodDebit.plus(d);
+          priorPeriodCredit = priorPeriodCredit.plus(c);
+        } else {
+          currentPeriodDebit = currentPeriodDebit.plus(d);
+          currentPeriodCredit = currentPeriodCredit.plus(c);
+        }
       }
 
       if (accClass === '1') {
@@ -550,15 +579,25 @@ export async function getBalanceSheetReport(params: {
         });
         balanceSheetByCurrency[cur].equity.total = balanceSheetByCurrency[cur].equity.total.plus(balance);
       } else if (accClass === '4') {
-        // Revenue contributes to Net Profit (credit - debit)
-        const rev = sumCredit.minus(sumDebit);
+        // Revenue:
+        // Current fiscal year revenue contributes to Current Period Profit
+        const currentRev = currentPeriodCredit.minus(currentPeriodDebit);
         balanceSheetByCurrency[cur].equity.currentPeriodProfit =
-          balanceSheetByCurrency[cur].equity.currentPeriodProfit.plus(rev);
+          balanceSheetByCurrency[cur].equity.currentPeriodProfit.plus(currentRev);
+
+        // Prior fiscal years unclosed revenue contributes to Prior Retained Earnings
+        const priorRev = priorPeriodCredit.minus(priorPeriodDebit);
+        priorRetainedEarnings = priorRetainedEarnings.plus(priorRev);
       } else if (accClass === '5') {
-        // Expense reduces Net Profit (debit - credit)
-        const exp = sumDebit.minus(sumCredit);
+        // Expense:
+        // Current fiscal year expense reduces Current Period Profit
+        const currentExp = currentPeriodDebit.minus(currentPeriodCredit);
         balanceSheetByCurrency[cur].equity.currentPeriodProfit =
-          balanceSheetByCurrency[cur].equity.currentPeriodProfit.minus(exp);
+          balanceSheetByCurrency[cur].equity.currentPeriodProfit.minus(currentExp);
+
+        // Prior fiscal years unclosed expense reduces Prior Retained Earnings
+        const priorExp = priorPeriodDebit.minus(priorPeriodCredit);
+        priorRetainedEarnings = priorRetainedEarnings.minus(priorExp);
       }
     }
 
@@ -567,50 +606,12 @@ export async function getBalanceSheetReport(params: {
     const currentPeriodProfit = bs.equity.currentPeriodProfit;
 
     // Independent Calculation of Retained Earnings & Opening Balance Equity:
-    // 1. Prior Period Retained Earnings: Net profits from posted ledger entries prior to current fiscal year
-    const fiscalYearStart = `${asOfDate.split('-')[0]}-01-01`;
-    let priorRetainedEarnings = new Decimal(0);
-
-    // 2. Initial Opening Balance Equity: Extracted directly from initial accounts opening balances
-    let openingAssetsSum = new Decimal(0);
-    let openingLiabSum = new Decimal(0);
-    let openingCapSum = new Decimal(0);
-
-    for (const acc of accounts) {
-      if (acc.currency !== cur) continue;
-      const isPrimary = acc.currency === cur;
-      const hasOpenJE = acc.ledgerLines.some(
-        (l) => l.currency === cur && l.ledgerEntry?.entryType === 'opening_balance'
-      );
-      if (isPrimary && !hasOpenJE) {
-        const baseOpen = new Decimal(acc.openingBalance.toString());
-        const cls = getAccountClass(acc);
-        if (cls === '1') openingAssetsSum = openingAssetsSum.plus(baseOpen);
-        if (cls === '2') openingLiabSum = openingLiabSum.plus(baseOpen);
-        if (cls === '3') openingCapSum = openingCapSum.plus(baseOpen);
-      }
-
-      // Check for prior year revenues/expenses
-      for (const line of acc.ledgerLines) {
-        if (line.currency !== cur) continue;
-        const cls = getAccountClass(acc);
-        if (cls === '4' || cls === '5') {
-          const entryDate = line.ledgerEntry.entryDate;
-          if (entryDate < fiscalYearStart) {
-            const d = new Decimal(line.debit.toString());
-            const c = new Decimal(line.credit.toString());
-            // Net profit contribution: + (Credit - Debit) for revenues, - (Debit - Credit) for expenses
-            const netContribution = cls === '4' ? c.minus(d) : c.minus(d);
-            priorRetainedEarnings = priorRetainedEarnings.plus(netContribution);
-          }
-        }
-      }
-    }
-
+    // 1. Prior Retained Earnings: Net unclosed profit from posted lines prior to fiscalYearStart
+    // 2. Opening Balance Equity: Net assets from initial unjournalized opening balances
     const openingBalanceEquity = openingAssetsSum.minus(openingLiabSum).minus(openingCapSum);
     const retainedEarningsTotal = priorRetainedEarnings.plus(openingBalanceEquity);
 
-    // Total Equity is an INDEPENDENT sum of Capital + Prior Retained Earnings + Opening Balance Equity + Current Profit
+    // Total Equity is an INDEPENDENT sum of Capital/Class 3 + Prior Retained Earnings + Opening Balance Equity + Current Profit
     const finalTotalEquity = capitalTotal.plus(retainedEarningsTotal).plus(currentPeriodProfit);
     const totalLiabilitiesAndEquity = bs.liabilities.total.plus(finalTotalEquity);
 

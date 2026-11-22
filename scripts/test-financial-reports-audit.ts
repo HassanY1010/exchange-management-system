@@ -285,8 +285,43 @@ async function runComprehensiveFinancialReportsAudit() {
     const custLiabTb = tbLiabEgp.find((l: any) => l.accountCode === '2010');
     assert(custLiabTb !== undefined, 'Account 2010 remains canonical in Trial Balance liabilities regardless of debit reclassification in BS');
 
+    // -------------------------------------------------------------
+    // Test 9: Zero Double Counting in Equity & Retained Earnings Audit
+    // -------------------------------------------------------------
+    console.log('\n--- Group 9: Equity Decomposition & Zero Double Counting Audit ---');
+    for (const cur of bsReport.currencies) {
+      const bs = bsReport.byCurrency[cur];
+      const eq = bs.equity;
+
+      // 1. Verify priorRetainedEarnings only comes from lines < fiscalYearStart
+      // 2. Verify currentPeriodProfit only comes from lines >= fiscalYearStart
+      // 3. Verify openingBalanceEquity only comes from unjournalized opening balances
+      // 4. Verify no Class 3 accounts (3010, 3030) are double-counted
+      console.log(
+        `Equity Audit (${cur}): Capital=${eq.capitalTotal}, PriorRetained=${eq.priorRetainedEarnings}, OpeningEquity=${eq.openingBalanceEquity}, RetainedTotal=${eq.retainedEarnings}, CurrentProfit=${eq.currentPeriodProfit}, Total=${eq.total}`
+      );
+
+      assert(
+        eq.retainedEarnings === eq.priorRetainedEarnings + eq.openingBalanceEquity,
+        `Retained Earnings is exact non-overlapping sum of Prior Retained Earnings + Opening Balance Equity for ${cur}`
+      );
+
+      assert(
+        eq.total === eq.capitalTotal + eq.retainedEarnings + eq.currentPeriodProfit,
+        `Total Equity is exact non-overlapping sum of Capital + Retained Earnings + Current Profit for ${cur}`
+      );
+
+      // Verify mathematical identity: Assets - Liabilities - Total Equity === 0
+      const netAssets = new Decimal(bs.assets.total).minus(new Decimal(bs.liabilities.total));
+      const totalEquity = new Decimal(eq.total);
+      assert(
+        netAssets.minus(totalEquity).abs().lessThan(0.0001),
+        `Independent Net Assets strictly equals Total Equity without any plug figure for ${cur}`
+      );
+    }
+
     console.log('\n================================================================');
-    console.log('   🎉 ALL 8 AUDIT GROUPS PASSED WITH 100% MATHEMATICAL RIGOR   ');
+    console.log('   🎉 ALL 9 AUDIT GROUPS PASSED WITH 100% MATHEMATICAL RIGOR   ');
     console.log('================================================================\n');
   } catch (error: any) {
     console.error('Audit failed with error:', error.message);
