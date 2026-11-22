@@ -282,7 +282,7 @@ export async function POST(req: NextRequest) {
           referenceType: 'Account',
           referenceId: newAcc.id,
           description: `قيد رصيد افتتاحي معتمد للصندوق/الحساب ${newAcc.name} بمبلغ ${dOpening.toNumber().toLocaleString()} ${cur}`,
-          createdBy: user.name,
+          createdBy: user.name || user.email || user.userId || 'system',
           tx,
           lines: [
             {

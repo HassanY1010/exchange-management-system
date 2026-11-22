@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
           referenceType: 'AccountTransfer',
           referenceId: transferNumber,
           description: descText,
-          createdBy: user.name,
+          createdBy: user.name || user.email || user.userId || 'system',
           tx,
           lines: [
             {
@@ -189,7 +189,7 @@ export async function POST(req: NextRequest) {
             description: descText,
             status: 'completed',
             ledgerEntryId: ledgerEntry.id,
-            createdBy: user.name,
+            createdBy: user.name || user.email || user.userId || 'system',
           },
         });
 
@@ -214,16 +214,50 @@ export async function POST(req: NextRequest) {
           finalToAmount = dAmount.times(finalExchangeRate);
         }
 
-        // Locate Currency Clearing Accounts
-        const clearingFrom =
-          (await tx.account.findFirst({
-            where: { currency: fromAcc.currency, accountType: { in: ['cash_safe', 'clearing'] }, accountCode: { startsWith: '106' } },
-          })) || (await tx.account.findFirst({ where: { accountCode: '1060' } }));
+        // Locate Currency Clearing Accounts (currency-isolated to prevent currency mixing)
+        let clearingFrom = await tx.account.findFirst({
+          where: { currency: fromAcc.currency, accountType: { in: ['cash_safe', 'clearing'] }, accountCode: { startsWith: '106' } },
+        });
 
-        const clearingTo =
-          (await tx.account.findFirst({
-            where: { currency: toAcc.currency, accountType: { in: ['cash_safe', 'clearing'] }, accountCode: { startsWith: '106' } },
-          })) || (await tx.account.findFirst({ where: { accountCode: '1065' } }));
+        if (!clearingFrom) {
+          const code = fromAcc.currency === 'EGP' ? '1060' : fromAcc.currency === 'SDG' ? '1065' : `1060-${fromAcc.currency}`;
+          clearingFrom = await tx.account.upsert({
+            where: { accountCode: code },
+            create: {
+              accountCode: code,
+              name: `حساب وسيط تسوية وتبادل العملات (${fromAcc.currency})`,
+              accountType: 'clearing',
+              currency: fromAcc.currency,
+              openingBalance: 0,
+              currentBalance: 0,
+              isSystem: true,
+              status: 'active',
+            },
+            update: {},
+          });
+        }
+
+        let clearingTo = await tx.account.findFirst({
+          where: { currency: toAcc.currency, accountType: { in: ['cash_safe', 'clearing'] }, accountCode: { startsWith: '106' } },
+        });
+
+        if (!clearingTo) {
+          const code = toAcc.currency === 'EGP' ? '1060' : toAcc.currency === 'SDG' ? '1065' : `1060-${toAcc.currency}`;
+          clearingTo = await tx.account.upsert({
+            where: { accountCode: code },
+            create: {
+              accountCode: code,
+              name: `حساب وسيط تسوية وتبادل العملات (${toAcc.currency})`,
+              accountType: 'clearing',
+              currency: toAcc.currency,
+              openingBalance: 0,
+              currentBalance: 0,
+              isSystem: true,
+              status: 'active',
+            },
+            update: {},
+          });
+        }
 
         if (!clearingFrom || !clearingTo) {
           throw new Error('حسابات الوساطة وتسوية العملات غير مهيأة للتحويل متعدد العملات');
@@ -239,7 +273,7 @@ export async function POST(req: NextRequest) {
           referenceType: 'AccountTransfer',
           referenceId: transferNumber,
           description: `خصم تحويل عملة من ${fromAcc.name} (${dAmount.toNumber().toLocaleString()} ${fromAcc.currency})`,
-          createdBy: user.name,
+          createdBy: user.name || user.email || user.userId || 'system',
           tx,
           lines: [
             {
@@ -265,7 +299,7 @@ export async function POST(req: NextRequest) {
           referenceType: 'AccountTransfer',
           referenceId: transferNumber,
           description: `إيداع تحويل عملة في ${toAcc.name} (${finalToAmount.toNumber().toLocaleString()} ${toAcc.currency})`,
-          createdBy: user.name,
+          createdBy: user.name || user.email || user.userId || 'system',
           tx,
           lines: [
             {
@@ -300,7 +334,7 @@ export async function POST(req: NextRequest) {
             description: descText,
             status: 'completed',
             ledgerEntryId: leg1.id,
-            createdBy: user.name,
+            createdBy: user.name || user.email || user.userId || 'system',
           },
         });
 
