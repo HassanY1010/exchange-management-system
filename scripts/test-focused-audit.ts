@@ -14,66 +14,64 @@ async function runFocusedAudit() {
 
   try {
     // ========================================================================
-    // PART 1: TIMEZONE AUDIT: ASIA/ADEN (YEMEN UTC+3) & DST IMMUNITY
+    // PART 1: TIMEZONE AUDIT: AFRICA/CAIRO (EGYPT UTC+2 / UTC+3 DYNAMIC DST)
     // ========================================================================
     console.log('------------------------------------------------------------------------');
-    console.log('PART 1: Timezone Verification: Asia/Aden (Yemen UTC+3)');
+    console.log('PART 1: Timezone Verification: Africa/Cairo (Egypt Dynamic DST)');
     console.log('------------------------------------------------------------------------');
 
-    // 1.1 Yemen Midnight Boundary Test
-    // 2026-11-22 at 20:59:59.999 UTC is 23:59:59.999 in Yemen (UTC+3) -> Must be 2026-11-22
-    const beforeMidnightUtc = new Date('2026-11-22T20:59:59.999Z');
-    const dateBeforeMidnight = getSystemBusinessDate(beforeMidnightUtc);
-    console.log('  [1.1a] 20:59:59 UTC (23:59:59 Yemen):', dateBeforeMidnight);
-    if (dateBeforeMidnight !== '2026-11-22') {
-      throw new Error(`Failed 1.1a: Expected 2026-11-22, got ${dateBeforeMidnight}`);
+    // 1.1 Winter Midnight Boundary Test (UTC+2 in Cairo)
+    // 2026-01-14 at 21:59:59.999 UTC is 23:59:59.999 in Cairo -> Must be 2026-01-14
+    const winterBeforeMidnight = new Date('2026-01-14T21:59:59.999Z');
+    const dateWinterBefore = getSystemBusinessDate(winterBeforeMidnight);
+    console.log('  [1.1a] 21:59:59 UTC (23:59:59 Cairo Winter):', dateWinterBefore);
+    if (dateWinterBefore !== '2026-01-14') {
+      throw new Error(`Failed 1.1a: Expected 2026-01-14, got ${dateWinterBefore}`);
     }
 
-    // 2026-11-22 at 21:00:00.000 UTC is EXACTLY 00:00:00 in Yemen (UTC+3) -> Must be 2026-11-23
-    const atMidnightUtc = new Date('2026-11-22T21:00:00.000Z');
-    const dateAtMidnight = getSystemBusinessDate(atMidnightUtc);
-    console.log('  [1.1b] 21:00:00 UTC (00:00:00 Yemen Midnight):', dateAtMidnight);
-    if (dateAtMidnight !== '2026-11-23') {
-      throw new Error(`Failed 1.1b: Expected 2026-11-23, got ${dateAtMidnight}`);
+    // 2026-01-14 at 22:00:00.000 UTC is EXACTLY 00:00:00 Cairo midnight (UTC+2) -> Must be 2026-01-15
+    const winterAtMidnight = new Date('2026-01-14T22:00:00.000Z');
+    const dateWinterAtMidnight = getSystemBusinessDate(winterAtMidnight);
+    console.log('  [1.1b] 22:00:00 UTC (00:00:00 Cairo Midnight Winter):', dateWinterAtMidnight);
+    if (dateWinterAtMidnight !== '2026-01-15') {
+      throw new Error(`Failed 1.1b: Expected 2026-01-15, got ${dateWinterAtMidnight}`);
     }
 
-    // 2026-11-22 at 21:30:00 UTC is 00:30:00 in Yemen (UTC+3) -> Must be 2026-11-23
-    const afterMidnightUtc = new Date('2026-11-22T21:30:00.000Z');
-    const dateAfterMidnight = getSystemBusinessDate(afterMidnightUtc);
-    console.log('  [1.1c] 21:30:00 UTC (00:30:00 Yemen):', dateAfterMidnight);
-    if (dateAfterMidnight !== '2026-11-23') {
-      throw new Error(`Failed 1.1c: Expected 2026-11-23, got ${dateAfterMidnight}`);
+    // 1.2 Summer Midnight Boundary Test (UTC+3 in Cairo)
+    // 2026-07-14 at 20:59:59.999 UTC is 23:59:59.999 in Cairo -> Must be 2026-07-14
+    const summerBeforeMidnight = new Date('2026-07-14T20:59:59.999Z');
+    const dateSummerBefore = getSystemBusinessDate(summerBeforeMidnight);
+    console.log('  [1.2a] 20:59:59 UTC (23:59:59 Cairo Summer):', dateSummerBefore);
+    if (dateSummerBefore !== '2026-07-14') {
+      throw new Error(`Failed 1.2a: Expected 2026-07-14, got ${dateSummerBefore}`);
     }
 
-    // 2026-11-23 at 00:00:00 UTC is 03:00:00 in Yemen -> Must be 2026-11-23
-    const utcMidnight = new Date('2026-11-23T00:00:00.000Z');
-    const dateUtcMidnight = getSystemBusinessDate(utcMidnight);
-    console.log('  [1.1d] 00:00:00 UTC (03:00:00 Yemen):', dateUtcMidnight);
-    if (dateUtcMidnight !== '2026-11-23') {
-      throw new Error(`Failed 1.1d: Expected 2026-11-23, got ${dateUtcMidnight}`);
+    // 2026-07-14 at 21:00:00.000 UTC is EXACTLY 00:00:00 Cairo midnight (UTC+3) -> Must be 2026-07-15
+    const summerAtMidnight = new Date('2026-07-14T21:00:00.000Z');
+    const dateSummerAtMidnight = getSystemBusinessDate(summerAtMidnight);
+    console.log('  [1.2b] 21:00:00 UTC (00:00:00 Cairo Midnight Summer):', dateSummerAtMidnight);
+    if (dateSummerAtMidnight !== '2026-07-15') {
+      throw new Error(`Failed 1.2b: Expected 2026-07-15, got ${dateSummerAtMidnight}`);
     }
-    console.log('  [PASS] Yemen midnight boundaries verified with 100% precision.');
 
-    // 1.2 DST Immunity Test: Compare Asia/Aden vs foreign timezones with DST changes
-    // In Egypt (Cairo), DST changes between Summer (UTC+3) and Winter (UTC+2)
-    // In Yemen (Aden), offset is ALWAYS strictly UTC+3 (zero DST) all year round
-    const summerDate = new Date('2026-07-15T10:00:00Z');
-    const winterDate = new Date('2026-01-15T10:00:00Z');
+    // 1.3 Dynamic Seasonal Offset Evaluation (No Hardcoded Offsets)
+    const summerDate = new Date('2026-07-15T12:00:00Z');
+    const winterDate = new Date('2026-01-15T12:00:00Z');
 
-    const getOffsetHours = (d: Date, tz: string) => {
+    const getOffsetHours = (d: Date, tzName: string) => {
       const utcStr = d.toLocaleString('en-US', { timeZone: 'UTC' });
-      const tzStr = d.toLocaleString('en-US', { timeZone: tz });
+      const tzStr = d.toLocaleString('en-US', { timeZone: tzName });
       return (new Date(tzStr).getTime() - new Date(utcStr).getTime()) / (1000 * 60 * 60);
     };
 
-    const adenSummerOffset = getOffsetHours(summerDate, 'Asia/Aden');
-    const adenWinterOffset = getOffsetHours(winterDate, 'Asia/Aden');
-    console.log(`  [1.2] Asia/Aden Offset: Summer=${adenSummerOffset}h, Winter=${adenWinterOffset}h`);
+    const cairoSummerOffset = getOffsetHours(summerDate, 'Africa/Cairo');
+    const cairoWinterOffset = getOffsetHours(winterDate, 'Africa/Cairo');
+    console.log(`  [1.3] Africa/Cairo Dynamic Offsets: Summer=UTC+${cairoSummerOffset}, Winter=UTC+${cairoWinterOffset}`);
 
-    if (adenSummerOffset !== 3 || adenWinterOffset !== 3) {
-      throw new Error(`Failed 1.2: Asia/Aden offset deviated from UTC+3!`);
+    if (cairoSummerOffset !== 3 || cairoWinterOffset !== 2) {
+      throw new Error(`Failed 1.3: Africa/Cairo dynamic offsets incorrect! Summer=${cairoSummerOffset}, Winter=${cairoWinterOffset}`);
     }
-    console.log('  [PASS] Asia/Aden is invariant and completely immune to foreign DST shifts.');
+    console.log('  [PASS] Africa/Cairo dynamic DST & midnight boundaries verified with 100% precision.');
 
     // ========================================================================
     // PART 2: CONCURRENCY INTEGRATION TEST (LOCKING & BLOCKED LEDGER WRITES)

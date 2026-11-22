@@ -239,26 +239,26 @@ async function runFinalAudit() {
     console.log('         - Total Historical Snapshots Archived:', parsedDiff.snapshotsHistory.length);
 
     // =============================================================
-    // TEST 4: Business Date & Midnight Timezone Drift (Asia/Aden - Yemen UTC+3)
+    // TEST 4: Business Date & Midnight Timezone Drift (Africa/Cairo)
     // =============================================================
     console.log('\n---------------------------------------------------------------');
-    console.log('TEST 4: Business Date Determination & Yemen (Asia/Aden) Timezone Test');
+    console.log('TEST 4: Business Date Determination & Cairo (Africa/Cairo) Timezone Test');
     console.log('---------------------------------------------------------------');
 
-    // Test case: 12:30 AM Yemen time (UTC+3) on 2026-11-23
-    // In UTC, this is 2026-11-22T21:30:00Z!
-    const testMidnightDate = new Date('2026-11-22T21:30:00.000Z');
-    const yemenDate = getSystemBusinessDate(testMidnightDate, 'Asia/Aden');
+    // Test case: In November (Winter UTC+2), 12:30 AM Cairo time on 2026-11-23
+    // In UTC, this is 2026-11-22T22:30:00Z!
+    const testMidnightDate = new Date('2026-11-22T22:30:00.000Z');
+    const cairoDate = getSystemBusinessDate(testMidnightDate, 'Africa/Cairo');
     const serverUtcDate = testMidnightDate.toISOString().split('T')[0];
 
     console.log('  UTC Timestamp:              ', testMidnightDate.toISOString());
     console.log('  Server UTC Date:            ', serverUtcDate, '(Previous Day!)');
-    console.log('  Operational Yemen Date:     ', yemenDate, '(Target Business Day!)');
+    console.log('  Operational Cairo Date:     ', cairoDate, '(Target Business Day!)');
 
-    if (yemenDate !== '2026-11-23') {
-      throw new Error(`Timezone drift error! Expected 2026-11-23 but got ${yemenDate}`);
+    if (cairoDate !== '2026-11-23') {
+      throw new Error(`Timezone drift error! Expected 2026-11-23 but got ${cairoDate}`);
     }
-    console.log('  [PASS] Yemen (Asia/Aden) timezone resolved accurately across UTC midnight boundary.');
+    console.log('  [PASS] Cairo (Africa/Cairo) timezone resolved accurately across UTC midnight boundary.');
 
     // Clean up test data
     await prisma.dailyClosing.deleteMany({
