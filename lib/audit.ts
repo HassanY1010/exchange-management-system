@@ -1,4 +1,5 @@
 import { prisma } from './db';
+import { ensureDatabaseSchema, resetSchemaEnsuredFlag } from './db-init';
 
 const SENSITIVE_KEYS = new Set([
   'password',
@@ -76,22 +77,36 @@ export async function logAuditEvent(params: CreateAuditLogParams) {
   const sanitizedOld = params.oldValues ? sanitizeAuditData(params.oldValues) : null;
   const sanitizedNew = params.newValues ? sanitizeAuditData(params.newValues) : null;
 
+  const insertData = {
+    userId: params.userId,
+    action: params.action,
+    entityType: params.entityType,
+    entityId: params.entityId,
+    oldValues: sanitizedOld ? JSON.stringify(sanitizedOld) : null,
+    newValues: sanitizedNew ? JSON.stringify(sanitizedNew) : null,
+    reason: params.reason,
+    ipAddress: params.ipAddress || '127.0.0.1',
+    userAgent: params.userAgent || 'Web/Browser',
+    status,
+  };
+
   try {
+    await ensureDatabaseSchema();
     return await client.auditLog.create({
-      data: {
-        userId: params.userId,
-        action: params.action,
-        entityType: params.entityType,
-        entityId: params.entityId,
-        oldValues: sanitizedOld ? JSON.stringify(sanitizedOld) : null,
-        newValues: sanitizedNew ? JSON.stringify(sanitizedNew) : null,
-        reason: params.reason,
-        ipAddress: params.ipAddress || '127.0.0.1',
-        userAgent: params.userAgent || 'Web/Browser',
-        status,
-      },
+      data: insertData,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'P2022') {
+      try {
+        resetSchemaEnsuredFlag();
+        await ensureDatabaseSchema();
+        return await client.auditLog.create({
+          data: insertData,
+        });
+      } catch (retryErr) {
+        console.error('Failed to write audit log on retry:', retryErr);
+      }
+    }
     console.error('Failed to write audit log:', error);
     // If inside a database transaction, re-throw to abort and rollback financial mutation without audit
     if (params.tx) {

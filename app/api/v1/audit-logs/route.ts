@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { getSystemStartOfDay, getSystemDayRange } from '@/lib/financial-core';
+import { ensureDatabaseSchema, resetSchemaEnsuredFlag } from '@/lib/db-init';
 
 /**
  * Helper to escape CSV fields according to RFC 4180
@@ -98,14 +99,32 @@ export async function GET(req: NextRequest) {
     ];
   }
 
+  // Ensure database schema additions exist (self-healing for remote environments)
+  await ensureDatabaseSchema();
+
   // 3. Handle Export Requests (CSV or JSON)
   if (exportFormat === 'csv' || exportFormat === 'json') {
     const exportTake = 2000;
-    const exportLogs = await prisma.auditLog.findMany({
-      where: whereClause,
-      orderBy: { createdAt: 'desc' },
-      take: exportTake,
-    });
+    let exportLogs;
+    try {
+      exportLogs = await prisma.auditLog.findMany({
+        where: whereClause,
+        orderBy: { createdAt: 'desc' },
+        take: exportTake,
+      });
+    } catch (dbErr: any) {
+      if (dbErr?.code === 'P2022') {
+        resetSchemaEnsuredFlag();
+        await ensureDatabaseSchema();
+        exportLogs = await prisma.auditLog.findMany({
+          where: whereClause,
+          orderBy: { createdAt: 'desc' },
+          take: exportTake,
+        });
+      } else {
+        throw dbErr;
+      }
+    }
 
     // Resolve user names
     const uniqueUserIds = Array.from(new Set(exportLogs.map((l) => l.userId).filter(Boolean))) as string[];
@@ -165,15 +184,35 @@ export async function GET(req: NextRequest) {
   }
 
   // 4. Paginated Database Query
-  const [totalCount, logs] = await Promise.all([
-    prisma.auditLog.count({ where: whereClause }),
-    prisma.auditLog.findMany({
-      where: whereClause,
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
-    }),
-  ]);
+  let totalCount: number;
+  let logs: any[];
+  try {
+    [totalCount, logs] = await Promise.all([
+      prisma.auditLog.count({ where: whereClause }),
+      prisma.auditLog.findMany({
+        where: whereClause,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+    ]);
+  } catch (dbErr: any) {
+    if (dbErr?.code === 'P2022') {
+      resetSchemaEnsuredFlag();
+      await ensureDatabaseSchema();
+      [totalCount, logs] = await Promise.all([
+        prisma.auditLog.count({ where: whereClause }),
+        prisma.auditLog.findMany({
+          where: whereClause,
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+      ]);
+    } else {
+      throw dbErr;
+    }
+  }
 
   // Enrich logs with User information
   const uniqueUserIds = Array.from(new Set(logs.map((l) => l.userId).filter(Boolean))) as string[];

@@ -5,11 +5,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
-    "start": "next start",
+    "build": "prisma generate && (prisma migrate deploy || true) && next build",
+    "start": "prisma migrate deploy && next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
+    "prisma:deploy": "prisma migrate deploy",
     "prisma:push": "prisma db push",
     "prisma:seed": "node scripts/seed.mjs",
     "test": "node scripts/test-financial-core.mjs"

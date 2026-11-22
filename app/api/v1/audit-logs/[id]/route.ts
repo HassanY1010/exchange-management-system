@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
+import { ensureDatabaseSchema, resetSchemaEnsuredFlag } from '@/lib/db-init';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getUserFromRequest(req);
@@ -15,9 +16,25 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   const { id } = params;
-  const log = await prisma.auditLog.findUnique({
-    where: { id },
-  });
+
+  await ensureDatabaseSchema();
+
+  let log;
+  try {
+    log = await prisma.auditLog.findUnique({
+      where: { id },
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2022') {
+      resetSchemaEnsuredFlag();
+      await ensureDatabaseSchema();
+      log = await prisma.auditLog.findUnique({
+        where: { id },
+      });
+    } else {
+      throw err;
+    }
+  }
 
   if (!log) {
     return NextResponse.json(
