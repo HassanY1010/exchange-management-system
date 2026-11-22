@@ -174,16 +174,39 @@ model Account {
   id              String        @id @default(uuid())
   accountCode     String        @unique
   name            String
-  accountType     String        // cash_safe, bank, bankak, employee_custody, supplier_liability, customer_liability, capital, expense, profit_loss
+  description     String?
+  accountType     String        // cash_safe, bank, bankak, employee_custody, supplier_liability, customer_liability, capital, expense, profit_loss, clearing
   currency        String        // EGP, SDG, USD, SAR, AED
   parentAccountId String?
+  parentAccount   Account?      @relation("AccountHierarchy", fields: [parentAccountId], references: [id])
+  childAccounts   Account[]     @relation("AccountHierarchy")
   openingBalance  Decimal       @default(0) @db.Decimal(20, 4)
   currentBalance  Decimal       @default(0) @db.Decimal(20, 4)
+  isSystem        Boolean       @default(false)
   status          String        @default("active") // active, inactive, locked
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   ledgerLines     LedgerLine[]
+}
+
+model AccountTransfer {
+  id              String   @id @default(uuid())
+  transferNumber  String   @unique
+  fromAccountId   String
+  toAccountId     String
+  amount          Decimal  @db.Decimal(20, 4)
+  currency        String
+  toAmount        Decimal? @db.Decimal(20, 4)
+  toCurrency      String?
+  exchangeRate    Decimal? @db.Decimal(20, 4)
+  feeAmount       Decimal  @default(0) @db.Decimal(20, 4)
+  description     String?
+  status          String   @default("completed") // completed, reversed
+  ledgerEntryId   String?
+  createdBy       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model LedgerEntry {
