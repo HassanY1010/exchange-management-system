@@ -143,16 +143,32 @@ export async function GET(req: NextRequest) {
     expensesTodayByCurrency[exp.currency] = (expensesTodayByCurrency[exp.currency] || 0) + Number(exp.amount);
   }
 
-  // 5. Debts
+  // 5. Debts (strictly active, isolated by currency)
   const debts = await prisma.debt.findMany({
     where: { status: { in: ['outstanding', 'partially_paid', 'overdue'] } },
   });
   const totalCustomerDebts = debts
-    .filter((d) => d.debtorType === 'customer')
+    .filter((d) => d.debtorType === 'customer' && d.currency === 'EGP')
     .reduce((sum, d) => sum + Number(d.remainingAmount), 0);
   const totalSupplierDebts = debts
-    .filter((d) => d.debtorType === 'supplier')
+    .filter((d) => (d.debtorType === 'supplier' || d.creditorType === 'supplier') && d.currency === 'EGP')
     .reduce((sum, d) => sum + Number(d.remainingAmount), 0);
+
+  const debtsByCurrency: {
+    customerReceivables: Record<string, number>;
+    supplierPayables: Record<string, number>;
+  } = { customerReceivables: {}, supplierPayables: {} };
+
+  for (const d of debts) {
+    const cur = d.currency;
+    const rem = Number(d.remainingAmount);
+    if (d.debtorType === 'customer') {
+      debtsByCurrency.customerReceivables[cur] = (debtsByCurrency.customerReceivables[cur] || 0) + rem;
+    }
+    if (d.debtorType === 'supplier' || d.creditorType === 'supplier') {
+      debtsByCurrency.supplierPayables[cur] = (debtsByCurrency.supplierPayables[cur] || 0) + rem;
+    }
+  }
 
   // 6. RBAC-Protected Recent Ledger Entries
   const canViewLedger = ['admin', 'accountant'].includes(user.role);
@@ -288,6 +304,7 @@ export async function GET(req: NextRequest) {
     expensesTodayByCurrency: isFinanceRole ? expensesTodayByCurrency : {},
     totalCustomerDebts: isFinanceRole ? totalCustomerDebts : 0,
     totalSupplierDebts: isFinanceRole ? totalSupplierDebts : 0,
+    debtsByCurrency: isFinanceRole ? debtsByCurrency : { customerReceivables: {}, supplierPayables: {} },
   };
 
   return NextResponse.json({
