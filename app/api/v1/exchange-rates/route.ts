@@ -52,7 +52,16 @@ export async function GET(req: NextRequest) {
   const pairs = new Set<string>();
   rates.forEach((r) => pairs.add(`${r.fromCurrency}/${r.toCurrency}`));
 
-  const spreads: Record<string, { customerRate: number | null; supplierRate: number | null; marketRate: number | null; spread: number | null; marginPercent: number | null }> = {};
+  const spreads: Record<string, {
+    customerRate: number | null;
+    supplierRate: number | null;
+    marketRate: number | null;
+    spread: number | null;
+    marginPercent: number | null;
+    isPositiveMargin: boolean;
+    quoteDirection: 'DIRECT' | 'INDIRECT' | 'MIXED';
+  }> = {};
+
   Array.from(pairs).forEach((pair) => {
     const [from, to] = pair.split('/');
     const cust = activeRatesMap.get(`${from}_${to}_customer`);
@@ -65,9 +74,40 @@ export async function GET(req: NextRequest) {
 
     let spread: number | null = null;
     let marginPercent: number | null = null;
-    if (cRate !== null && sRate !== null && sRate > 0) {
-      spread = Number(new Decimal(cRate).minus(new Decimal(sRate)).toFixed(4));
-      marginPercent = Number(new Decimal(spread).dividedBy(new Decimal(sRate)).times(100).toFixed(2));
+    let isPositiveMargin = false;
+    let quoteDirection: 'DIRECT' | 'INDIRECT' | 'MIXED' = 'DIRECT';
+
+    if (cRate !== null && sRate !== null && sRate > 0 && cRate > 0) {
+      const dCust = new Decimal(cRate);
+      const dSupp = new Decimal(sRate);
+
+      if (dCust.greaterThanOrEqualTo(1) && dSupp.greaterThanOrEqualTo(1)) {
+        // Direct Quote (e.g. 1 EGP = 200 SDG, 1 USD = 2800 SDG)
+        // Profit per base unit = customerRate - supplierRate
+        quoteDirection = 'DIRECT';
+        const dSpread = dCust.minus(dSupp);
+        spread = Number(dSpread.toFixed(4));
+        marginPercent = Number(dSpread.dividedBy(dSupp).times(100).toFixed(2));
+        isPositiveMargin = dSpread.greaterThan(0);
+      } else if (dCust.lessThan(1) && dSupp.lessThan(1)) {
+        // Inverted Quote (e.g. 1 SDG = 0.0050 EGP vs 1 SDG = 0.00526 EGP)
+        // In this direction, supplier gives more counter currency than customer receives
+        // Real profit = supplierRate - customerRate
+        quoteDirection = 'INDIRECT';
+        const dSpread = dSupp.minus(dCust);
+        spread = Number(dSpread.toFixed(6));
+        marginPercent = Number(dSpread.dividedBy(dCust).times(100).toFixed(2));
+        isPositiveMargin = dSpread.greaterThan(0);
+      } else {
+        // Mixed quotation: normalize both to direct terms (>= 1) to prevent phantom profit/loss
+        quoteDirection = 'MIXED';
+        const normCust = dCust.lessThan(1) ? new Decimal(1).dividedBy(dCust) : dCust;
+        const normSupp = dSupp.lessThan(1) ? new Decimal(1).dividedBy(dSupp) : dSupp;
+        const dSpread = normCust.minus(normSupp);
+        spread = Number(dSpread.toFixed(4));
+        marginPercent = Number(dSpread.dividedBy(normSupp).times(100).toFixed(2));
+        isPositiveMargin = dSpread.greaterThan(0);
+      }
     }
 
     spreads[pair] = {
@@ -76,6 +116,8 @@ export async function GET(req: NextRequest) {
       marketRate: mRate,
       spread,
       marginPercent,
+      isPositiveMargin,
+      quoteDirection,
     };
   });
 
@@ -165,8 +207,12 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
 
-    // 4. Atomic Execution & History Preservation with Row Lock
+    // 4. Atomic Execution & History Preservation with Advisory Lock
     const result = await prisma.$transaction(async (tx) => {
+      // Serialize concurrent updates for this exact currency pair and rateType
+      const lockKey = `fx_${cleanFrom}_${cleanTo}_${cleanType}`;
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey);
+
       // Find latest active rate before updating
       const prevActiveRate = await tx.exchangeRate.findFirst({
         where: {

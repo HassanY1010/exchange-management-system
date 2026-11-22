@@ -37,6 +37,8 @@ interface PairSpread {
   marketRate: number | null;
   spread: number | null;
   marginPercent: number | null;
+  isPositiveMargin?: boolean;
+  quoteDirection?: 'DIRECT' | 'INDIRECT' | 'MIXED';
 }
 
 export default function ExchangeRatesPage() {
@@ -404,9 +406,9 @@ export default function ExchangeRatesPage() {
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 bg-white/10 rounded text-[11px] font-bold text-blue-200">
-                    مؤشر الربحية لزوج {selectedPair}
+                    مؤشر الربحية لزوج {selectedPair} {currentPairActive.spreadData.quoteDirection === 'INDIRECT' ? '(تسعير عكسي)' : ''}
                   </span>
-                  {currentPairActive.spreadData.spread > 0 ? (
+                  {currentPairActive.spreadData.isPositiveMargin ? (
                     <span className="text-emerald-300 text-xs font-bold flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       هامش تجاري إيجابي
@@ -427,14 +429,14 @@ export default function ExchangeRatesPage() {
                 <div className="text-left sm:text-right">
                   <div className="text-xs text-blue-200 font-bold">الفارق بالوحدة</div>
                   <div className="text-xl sm:text-2xl font-black font-mono text-white">
-                    +{currentPairActive.spreadData.spread.toFixed(2)}{' '}
+                    {currentPairActive.spreadData.spread > 0 ? `+${currentPairActive.spreadData.spread}` : currentPairActive.spreadData.spread}{' '}
                     <span className="text-xs font-normal text-blue-200">{selectedPair.split('/')[1]}</span>
                   </div>
                 </div>
 
                 <div className="text-left sm:text-right border-r border-white/20 pr-6">
                   <div className="text-xs text-blue-200 font-bold">نسبة الهامش التجاري</div>
-                  <div className="text-xl sm:text-2xl font-black font-mono text-emerald-300">
+                  <div className={`text-xl sm:text-2xl font-black font-mono ${currentPairActive.spreadData.isPositiveMargin ? 'text-emerald-300' : 'text-rose-300'}`}>
                     {currentPairActive.spreadData.marginPercent}%
                   </div>
                 </div>
