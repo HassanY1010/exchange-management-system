@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { ensureDatabaseSchema } from '@/lib/db-init';
 
 export async function GET() {
   const startTime = Date.now();
@@ -7,6 +8,7 @@ export async function GET() {
 
   try {
     await prisma.$queryRaw`SELECT 1`;
+    await ensureDatabaseSchema();
     dbStatus = 'connected';
   } catch (error) {
     dbStatus = 'error';
