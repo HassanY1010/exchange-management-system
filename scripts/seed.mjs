@@ -6,22 +6,27 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('--- بدء تهيئة قاعدة البيانات والبيانات الأساسية للنظام ---');
 
-  // Clean wipe of transactional data to ensure 100% ledger-account balance synchronization
-  await prisma.ledgerLine.deleteMany();
-  await prisma.ledgerEntry.deleteMany();
-  await prisma.cashPayoutVoucher.deleteMany();
-  await prisma.bankakReceipt.deleteMany();
-  await prisma.exchangeTransaction.deleteMany();
-  await prisma.custodyTransaction.deleteMany();
-  await prisma.employeeCustody.deleteMany();
-  await prisma.customerSession.deleteMany();
-  await prisma.dailyClosing.deleteMany();
-  await prisma.supplierTransaction.deleteMany();
-  await prisma.expense.deleteMany();
-  await prisma.debtPayment.deleteMany();
-  await prisma.debt.deleteMany();
-  await prisma.capitalTransaction.deleteMany();
-  console.log('1. تم تفريغ البيانات القديمة بنجاح');
+  // Safety Guard: Only wipe if explicitly requested with ALLOW_DATABASE_RESET=true in non-production
+  if (process.env.ALLOW_DATABASE_RESET === 'true' && process.env.NODE_ENV !== 'production') {
+    console.log('⚠️ جاري تفريغ بيانات المعاملات القديمة بسبب تمرير ALLOW_DATABASE_RESET...');
+    await prisma.ledgerLine.deleteMany();
+    await prisma.ledgerEntry.deleteMany();
+    await prisma.cashPayoutVoucher.deleteMany();
+    await prisma.bankakReceipt.deleteMany();
+    await prisma.exchangeTransaction.deleteMany();
+    await prisma.custodyTransaction.deleteMany();
+    await prisma.employeeCustody.deleteMany();
+    await prisma.customerSession.deleteMany();
+    await prisma.dailyClosing.deleteMany();
+    await prisma.supplierTransaction.deleteMany();
+    await prisma.expense.deleteMany();
+    await prisma.debtPayment.deleteMany();
+    await prisma.debt.deleteMany();
+    await prisma.capitalTransaction.deleteMany();
+    console.log('1. تم تفريغ البيانات القديمة بنجاح');
+  } else {
+    console.log('1. تم تفعيل وضع حماية بيانات الإنتاج (Production Data Protection) - لن يتم حذف أي معاملات حقيقية.');
+  }
 
   // 1. Roles
   const adminRole = await prisma.role.upsert({
@@ -162,39 +167,39 @@ async function main() {
     },
   });
 
-  // 5. Chart of Accounts (دليل الحسابات الأساسي)
+  // 5. Chart of Accounts (دليل الحسابات الأساسي - أرصدة صفرية نظيفة للنظام الجديد)
   const defaultAccounts = [
-    { code: '1010', name: 'الصندوق النقدي المصري الرئيسي (Main EGP Safe)', type: 'cash_safe', currency: 'EGP', balance: 1000000 },
-    { code: '1020', name: 'الصندوق النقدي السوداني (Main SDG Safe)', type: 'cash_safe', currency: 'SDG', balance: 5000000 },
-    { code: '1030', name: 'حساب بنكك الرئيسي (Bankak Account - BOK)', type: 'bankak', currency: 'SDG', balance: 10000000 },
-    { code: '1040', name: 'الحساب البنكي التجاري المصري (EGP Bank Account)', type: 'bank', currency: 'EGP', balance: 500000 },
-    { code: '1050', name: 'عهدة الموظف محمد (Custody Mohammed)', type: 'employee_custody', currency: 'EGP', balance: 500000 },
-    { code: '1060', name: 'حساب وسيط تسوية وتبادل العملات - مصري (Currency Clearing EGP)', type: 'clearing', currency: 'EGP', balance: 0 },
-    { code: '1065', name: 'حساب وسيط تسوية وتبادل العملات - سوداني (Currency Clearing SDG)', type: 'clearing', currency: 'SDG', balance: 0 },
-    { code: '2010', name: 'التزامات وحسابات العملاء المفتوحة - مصري (Customer Liabilities EGP)', type: 'customer_liability', currency: 'EGP', balance: 0 },
-    { code: '2015', name: 'التزامات وحسابات العملاء المفتوحة - سوداني (Customer Liabilities SDG)', type: 'customer_liability', currency: 'SDG', balance: 0 },
-    { code: '2020', name: 'التزامات وحسابات الموردين (Supplier Liabilities)', type: 'supplier_liability', currency: 'SDG', balance: 0 },
-    { code: '3010', name: 'رأس المال المستثمر (Invested Capital)', type: 'capital', currency: 'EGP', balance: 2000000 },
-    { code: '4010', name: 'أرباح فروق أسعار الصرف (Exchange Profits)', type: 'profit_loss', currency: 'EGP', balance: 0 },
-    { code: '5010', name: 'المصروفات التشغيلية والعمومية (Operating Expenses)', type: 'expense', currency: 'EGP', balance: 0 },
+    { code: '1010', name: 'الصندوق النقدي المصري الرئيسي (Main EGP Safe)', type: 'cash_safe', currency: 'EGP' },
+    { code: '1020', name: 'الصندوق النقدي السوداني (Main SDG Safe)', type: 'cash_safe', currency: 'SDG' },
+    { code: '1030', name: 'حساب بنكك الرئيسي (Bankak Account - BOK)', type: 'bankak', currency: 'SDG' },
+    { code: '1040', name: 'الحساب البنكي التجاري المصري (EGP Bank Account)', type: 'bank', currency: 'EGP' },
+    { code: '1050', name: 'عهدة الموظف محمد (Custody Mohammed)', type: 'employee_custody', currency: 'EGP' },
+    { code: '1060', name: 'حساب وسيط تسوية وتبادل العملات - مصري (Currency Clearing EGP)', type: 'clearing', currency: 'EGP' },
+    { code: '1065', name: 'حساب وسيط تسوية وتبادل العملات - سوداني (Currency Clearing SDG)', type: 'clearing', currency: 'SDG' },
+    { code: '2010', name: 'التزامات وحسابات العملاء المفتوحة - مصري (Customer Liabilities EGP)', type: 'customer_liability', currency: 'EGP' },
+    { code: '2015', name: 'التزامات وحسابات العملاء المفتوحة - سوداني (Customer Liabilities SDG)', type: 'customer_liability', currency: 'SDG' },
+    { code: '2020', name: 'التزامات وحسابات الموردين (Supplier Liabilities)', type: 'supplier_liability', currency: 'SDG' },
+    { code: '3010', name: 'رأس المال المستثمر (Invested Capital)', type: 'capital', currency: 'EGP' },
+    { code: '4010', name: 'أرباح فروق أسعار الصرف (Exchange Profits)', type: 'profit_loss', currency: 'EGP' },
+    { code: '5010', name: 'المصروفات التشغيلية والعمومية (Operating Expenses)', type: 'expense', currency: 'EGP' },
   ];
 
   for (const acc of defaultAccounts) {
     await prisma.account.upsert({
       where: { accountCode: acc.code },
-      update: { currentBalance: acc.balance, accountType: acc.type },
+      update: { accountType: acc.type },
       create: {
         accountCode: acc.code,
         name: acc.name,
         accountType: acc.type,
         currency: acc.currency,
-        openingBalance: acc.balance,
-        currentBalance: acc.balance,
+        openingBalance: 0,
+        currentBalance: 0,
         status: 'active',
       },
     });
   }
-  console.log('2. تم إنشاء الأدوار والصلاحيات بنجاح');
+  console.log('5. تم تثبيت دليل الحسابات بأرصدة افتتاحية صفرية معتمدة');
 
   // 6. Expense Categories
   const categories = [
@@ -213,51 +218,9 @@ async function main() {
       create: cat,
     });
   }
-  console.log('2. تم إنشاء الأدوار والصلاحيات بنجاح');
+  console.log('6. تم تثبيت تصنيفات المصروفات الأساسية');
 
-  // 7. Initial Exchange Rates
-  await prisma.exchangeRate.createMany({
-    data: [
-      { fromCurrency: 'EGP', toCurrency: 'SDG', rateType: 'customer', rate: 200, createdBy: adminUser.id },
-      { fromCurrency: 'EGP', toCurrency: 'SDG', rateType: 'supplier', rate: 190, createdBy: adminUser.id },
-      { fromCurrency: 'EGP', toCurrency: 'SDG', rateType: 'market_benchmark', rate: 195, createdBy: adminUser.id },
-    ],
-  });
-
-  // 8. Initial Customer: عمر أحمد
-  const customerOmar = await prisma.customer.upsert({
-    where: { customerCode: 'CUST-1001' },
-    update: {},
-    create: {
-      customerCode: 'CUST-1001',
-      name: 'عمر أحمد عبدالله',
-      phone: '+249912345678',
-      secondaryPhone: '+201112233445',
-      whatsapp: '+249912345678',
-      identityNumber: 'SD-88291029',
-      city: 'الخرطوم / القاهرة',
-      address: 'المعادي - القاهرة',
-      notes: 'عميل مميز - تحويلات بنكك منتظمة',
-      status: 'active',
-    },
-  });
-
-  // 9. Initial Supplier: شركة النور للصرافة
-  const supplierNoor = await prisma.supplier.upsert({
-    where: { supplierCode: 'SUP-501' },
-    update: {},
-    create: {
-      supplierCode: 'SUP-501',
-      name: 'شركة النور للخدمات المالية والصرافة',
-      phone: '+201200000050',
-      whatsapp: '+201200000050',
-      address: 'وسط البلد - القاهرة',
-      notes: 'توريد مبالغ سودانية ومصرية بأسعار الجملة',
-      status: 'active',
-    },
-  });
-
-  // 10. System Settings
+  // 7. System Settings
   const settings = [
     { key: 'company_name', value: 'أبو جواد للتجارة (ABU JAWAD FOR TRADEING)', description: 'اسم المؤسسة' },
     { key: 'company_logo', value: '/brand/logo.png', description: 'شعار المؤسسة' },
@@ -280,9 +243,9 @@ async function main() {
       create: s,
     });
   }
-  console.log('2. تم إنشاء الأدوار والصلاحيات بنجاح');
+  console.log('7. تم تثبيت إعدادات النظام والهوية التجارية الرسمية');
 
-  console.log('✅ تم تهيئة قاعدة البيانات بنجاح: تم إنشاء الأدوار، المستخدمين، دليل الحسابات، أسعار الصرف والإعدادات!');
+  console.log('✅ تم تهيئة النظام ببيانات النظام الأساسية (System Seed Data) فقط، بدون أي بيانات تجريبية أو وهمية!');
 }
 
 main()
