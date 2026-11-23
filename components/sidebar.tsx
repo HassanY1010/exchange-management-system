@@ -63,6 +63,11 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   }, []);
 
   const visibleMenuItems = React.useMemo(() => {
+    if (userRole === 'data_entry') {
+      // Data Entry: strictly operational customer accounts and receipts data entry
+      const allowed = ['/dashboard', '/customers', '/customer-sessions', '/receipts'];
+      return menuItems.filter((item) => allowed.includes(item.href));
+    }
     if (userRole === 'custody_officer') {
       // Custody Officer: restricted strictly to operational cash & custody pages
       const allowed = ['/dashboard', '/customers', '/customer-sessions', '/receipts', '/custody', '/accounts'];
