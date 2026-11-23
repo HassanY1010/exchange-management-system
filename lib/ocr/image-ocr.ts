@@ -69,6 +69,11 @@ class OcrWorkerManager {
       }
 
       const w = await createWorker(['ara', 'eng'], 1, options);
+      try {
+        await w.setParameters({ tessedit_pageseg_mode: '4' as any });
+      } catch (paramErr) {
+        console.warn('[OCR Worker] PSM 4 setParameters notice:', paramErr);
+      }
 
       this.worker = w;
       return w;

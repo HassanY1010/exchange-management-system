@@ -156,8 +156,14 @@ export default function ReceiptsPage() {
     });
   };
 
-  // Client-side image optimization: scales high-megapixel camera photos to optimal OCR size (~1600px)
+  // Client-side image optimization: preserves original quality for normal receipts (<3MB) and resizes huge camera photos (>3MB)
   const optimizeImageForOcr = async (file: File): Promise<{ base64: string; sizeFormatted: string }> => {
+    // Preserve 100% original pixel sharpness without lossy canvas compression for screenshot receipts
+    if (file.size <= 3 * 1024 * 1024) {
+      const base64 = await fileToBase64(file);
+      return { base64, sizeFormatted: formatFileSize(file.size) };
+    }
+
     return new Promise((resolve) => {
       if (!file.type.startsWith('image/') || file.type.includes('svg')) {
         fileToBase64(file).then((b) => resolve({ base64: b, sizeFormatted: formatFileSize(file.size) }));
@@ -168,7 +174,7 @@ export default function ReceiptsPage() {
       const objectUrl = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        const maxDim = 1200; // Optimal for OCR: crisp text without megapixel bloat or RAM exhaustion
+        const maxDim = 1800; // Crisp resolution for high-res photos
         let width = img.width;
         let height = img.height;
 
@@ -195,7 +201,7 @@ export default function ReceiptsPage() {
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
 
-        const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.88);
+        const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.95);
         const approxBytes = Math.round((optimizedBase64.length - optimizedBase64.indexOf(',') - 1) * 0.75);
         resolve({ base64: optimizedBase64, sizeFormatted: formatFileSize(approxBytes) });
       };
