@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
     }
 
     const results = [];
+    const failedItems: Array<{ index: number; error: string }> = [];
 
     // Pre-fetch all non-rejected receipts for multi-attribute risk and duplicate evaluation
     const existingReceipts: Array<{

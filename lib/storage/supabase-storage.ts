@@ -87,33 +87,44 @@ export async function uploadReceiptImage(
   }
 
   try {
-    const { data, error } = await supabase.storage
-      .from(defaultBucket)
-      .upload(`receipts/${fileId}`, fileBuffer, {
-        contentType,
-        upsert: true,
-      });
+    const uploadPromise = (async (): Promise<UploadReceiptResult> => {
+      const { data, error } = await supabase.storage
+        .from(defaultBucket)
+        .upload(`receipts/${fileId}`, fileBuffer, {
+          contentType,
+          upsert: true,
+        });
 
-    if (error) {
-      console.warn('Supabase storage upload warning (falling back to local):', error.message);
-      return await saveLocalFallback(fileBuffer, fileId);
-    }
+      if (error) {
+        console.warn('Supabase storage upload warning (falling back to local):', error.message);
+        return await saveLocalFallback(fileBuffer, fileId);
+      }
 
-    // Generate secure signed URL with token (valid for 24 hours, refreshed on demand)
-    const { data: signedData, error: signedError } = await supabase.storage
-      .from(defaultBucket)
-      .createSignedUrl(data.path, 86400);
+      // Generate secure signed URL with token (valid for 24 hours, refreshed on demand)
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from(defaultBucket)
+        .createSignedUrl(data.path, 86400);
 
-    if (signedError) {
-      console.warn('Warning generating signed URL:', signedError.message);
-    }
+      if (signedError) {
+        console.warn('Warning generating signed URL:', signedError.message);
+      }
 
-    return {
-      storageKey: data.path,
-      signedUrl: signedData?.signedUrl,
-      publicUrl: signedData?.signedUrl,
-      source: 'supabase_storage',
-    };
+      return {
+        storageKey: data.path,
+        signedUrl: signedData?.signedUrl,
+        publicUrl: signedData?.signedUrl,
+        source: 'supabase_storage',
+      };
+    })();
+
+    const timeoutPromise = new Promise<UploadReceiptResult>((resolve) => {
+      setTimeout(() => {
+        console.warn('Supabase upload timed out after 8s, falling back to local storage');
+        saveLocalFallback(fileBuffer, fileId).then(resolve);
+      }, 8000);
+    });
+
+    return await Promise.race([uploadPromise, timeoutPromise]);
   } catch (err) {
     console.warn('Failed to upload to Supabase, fallback to local file system:', err);
     return await saveLocalFallback(fileBuffer, fileId);

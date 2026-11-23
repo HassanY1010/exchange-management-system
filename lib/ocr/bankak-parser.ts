@@ -111,14 +111,17 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 4. Sender Account
   let senderAccount = '';
   const senderAccPatterns = [
-    /(?:\bSender\s*Account\b|\bFrom\s*Account\b|(?:رقم\s*)?حساب\s*المرسل|حساب\s*الخصم|من\s*الحساب|من\s*حساب|(?:رقم\s*)?(?:هاتف|موبايل|جوال)\s*المرسل)[\s:]*([0-9\*\-]{6,20})/i,
+    /(?:\bSender\s*Account\b|\bFrom\s*Account\b|(?:رقم\s*)?حساب\s*المرسل|حساب\s*الخصم|من\s*الحساب|من\s*حساب|(?:رقم\s*)?(?:هاتف|موبايل|جوال)\s*المرسل)[\s:]*([0-9\*\-](?:[0-9\*\-\s]{4,24}[0-9\*\-]|[0-9\*\-]{4,19}))/i,
   ];
   for (const pattern of senderAccPatterns) {
     const match = normalized.match(pattern);
     if (match) {
-      senderAccount = match[1].trim();
-      fieldsMatched++;
-      break;
+      const cleanAcc = match[1].replace(/\s+/g, '').trim();
+      if (cleanAcc.length >= 6) {
+        senderAccount = cleanAcc;
+        fieldsMatched++;
+        break;
+      }
     }
   }
 
@@ -140,14 +143,17 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 6. Receiver Account
   let receiverAccount = '';
   const receiverAccPatterns = [
-    /(?:\bBeneficiary\s*Account\b|\bTo\s*Account\b|(?:رقم\s*)?حساب\s*المستفيد|حساب\s*الإيداع|إلى\s*الحساب|إلى\s*حساب|(?:رقم\s*)?(?:هاتف|موبايل|جوال)\s*المستفيد)[\s:]*([0-9\*\-]{6,20})/i,
+    /(?:\bBeneficiary\s*Account\b|\bTo\s*Account\b|(?:رقم\s*)?حساب\s*المستفيد|حساب\s*الإيداع|[إا]لى\s*الحساب|[إا]لى\s*حساب|(?:رقم\s*)?(?:هاتف|موبايل|جوال)\s*المستفيد)[\s:]*([0-9\*\-](?:[0-9\*\-\s]{4,24}[0-9\*\-]|[0-9\*\-]{4,19}))/i,
   ];
   for (const pattern of receiverAccPatterns) {
     const match = normalized.match(pattern);
     if (match) {
-      receiverAccount = match[1].trim();
-      fieldsMatched++;
-      break;
+      const cleanAcc = match[1].replace(/\s+/g, '').trim();
+      if (cleanAcc.length >= 6) {
+        receiverAccount = cleanAcc;
+        fieldsMatched++;
+        break;
+      }
     }
   }
 

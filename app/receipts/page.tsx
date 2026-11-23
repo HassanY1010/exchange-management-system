@@ -60,6 +60,7 @@ export default function ReceiptsPage() {
   const [batchReceiptsText, setBatchReceiptsText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadStageText, setUploadStageText] = useState('جاري المعالجة واستخراج الـ OCR...');
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [uploadSummary, setUploadSummary] = useState<{
     total: number;
     success: number;
@@ -148,7 +149,7 @@ export default function ReceiptsPage() {
       const objectUrl = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        const maxDim = 1600; // Optimal for OCR: crisp text without megapixel bloat
+        const maxDim = 1200; // Optimal for OCR: crisp text without megapixel bloat or RAM exhaustion
         let width = img.width;
         let height = img.height;
 
@@ -175,7 +176,7 @@ export default function ReceiptsPage() {
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
 
-        const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.92);
+        const optimizedBase64 = canvas.toDataURL('image/jpeg', 0.88);
         const approxBytes = Math.round((optimizedBase64.length - optimizedBase64.indexOf(',') - 1) * 0.75);
         resolve({ base64: optimizedBase64, sizeFormatted: formatFileSize(approxBytes) });
       };
@@ -272,95 +273,194 @@ export default function ReceiptsPage() {
   // Submit batch of images or text with progressive feedback & timeout protection
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (uploading) return; // Prevent double submit
+
     setUploading(true);
-    setUploadStageText('رفع واستخراج بيانات الإيصال عبر OCR السريع...');
     setUploadSummary(null);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 35000); // 35s safety timeout guard
-
     try {
-      let itemsToUpload: any[] = [];
-
       if (uploadTab === 'images') {
         if (selectedFiles.length === 0) {
           throw new Error('يرجى اختيار صورة إيصال واحدة على الأقل أو التقاطها بالكاميرا');
         }
 
-        itemsToUpload = selectedFiles.map((f) => ({
-          customerId: selectedCustomerId || null,
-          customerSessionId: selectedSessionId || null,
-          imageData: f.base64Data,
-        }));
+        const total = selectedFiles.length;
+        setUploadProgress({ current: 0, total });
+        setUploadStageText(`بدء المعالجة واستخراج الـ OCR لـ (${total}) صور...`);
+
+        const allReturned: any[] = [];
+        let dupCount = 0;
+        let suspCount = 0;
+        let reviewCount = 0;
+        const failedErrors: string[] = [];
+
+        // Process images with concurrency-friendly individual requests to eliminate timeouts & isolate errors
+        for (let i = 0; i < total; i++) {
+          const currentFile = selectedFiles[i];
+          setUploadProgress({ current: i + 1, total });
+          setUploadStageText(`جاري قراءة واستخراج بيانات الصورة (${i + 1} من ${total})...`);
+
+          // Mark current file as uploading
+          setSelectedFiles((prev) =>
+            prev.map((f, idx) => (idx === i ? { ...f, status: 'uploading' } : f))
+          );
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s per individual image guard
+
+          try {
+            const res = await fetch('/api/v1/receipts/upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                items: [
+                  {
+                    customerId: selectedCustomerId || null,
+                    customerSessionId: selectedSessionId || null,
+                    imageData: currentFile.base64Data,
+                  },
+                ],
+              }),
+              signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+            const data = await res.json();
+
+            if (!res.ok || !data.success) {
+              throw new Error(data.error || 'فشل استخراج بيانات الإيصال');
+            }
+
+            const returned = data.data?.[0];
+            if (returned) {
+              allReturned.push(returned);
+              if (returned.isDuplicate || returned.status === 'duplicate') dupCount++;
+              if (returned.isSuspicious || returned.status === 'suspicious') suspCount++;
+              if (returned.status === 'pending_review' || returned.ocrConfidence < 70) reviewCount++;
+
+              // Mark as success
+              setSelectedFiles((prev) =>
+                prev.map((f, idx) => (idx === i ? { ...f, status: 'success' } : f))
+              );
+            }
+          } catch (fileErr: any) {
+            clearTimeout(timeoutId);
+            const isTimeout = fileErr.name === 'AbortError';
+            const errorMsg = isTimeout
+              ? 'تجاوزت مهلة معالجة الصورة (25 ثانية) - يمكنك مراجعتها يدوياً'
+              : fileErr.message || 'فشلت معالجة الصورة';
+
+            failedErrors.push(`صورة #${i + 1}: ${errorMsg}`);
+
+            // Mark this specific file as error, but continue processing the remaining images!
+            setSelectedFiles((prev) =>
+              prev.map((f, idx) =>
+                idx === i
+                  ? { ...f, status: 'error', errorMessage: errorMsg }
+                  : f
+              )
+            );
+          }
+        }
+
+        const successCount = allReturned.length;
+        if (successCount > 0) {
+          fetchReceipts();
+        }
+
+        setUploadSummary({
+          total,
+          success: successCount,
+          duplicates: dupCount,
+          suspicious: suspCount,
+          needsReview: reviewCount,
+          message:
+            successCount === total
+              ? `تم بنجاح رفع واستخراج بيانات جميع الإيصالات (${total} إيصالات) دون أي تعليق!`
+              : successCount > 0
+              ? `تمت معالجة ${successCount} من أصل ${total} بنجاح. تعذر استخراج ${failedErrors.length} (متاحة للمراجعة اليدوية).`
+              : `تعذرت المعالجة الآلية للصور: ${failedErrors.join(' | ')}`,
+        });
+
+        // If all succeeded with 0 issues, close modal smoothly after 2 seconds
+        if (successCount === total && dupCount === 0 && suspCount === 0 && reviewCount === 0) {
+          setTimeout(() => {
+            setUploadModalOpen(false);
+            setUploadSummary(null);
+            clearAllFiles();
+          }, 2000);
+        }
       } else {
-        // Text mode
+        // Text mode: parse blocks and submit
         if (!batchReceiptsText.trim()) {
           throw new Error('يرجى إدخال أو لصق نصوص الإيصالات');
         }
         const rawTextBlocks = batchReceiptsText.split(/\n\s*---\s*\n|\n\s*===\s*\n/);
-        itemsToUpload = rawTextBlocks.map((block, idx) => ({
+        const itemsToUpload = rawTextBlocks.map((block, idx) => ({
           customerId: selectedCustomerId || null,
           customerSessionId: selectedSessionId || null,
           rawOcrText: block.trim(),
           imageData: `simulated-bankak-receipt-${Date.now()}-${idx + 1}.png`,
         }));
-      }
 
-      setUploadStageText('جاري المعالجة السريعة والتحليل المالي للإشعارات...');
-      const res = await fetch('/api/v1/receipts/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: itemsToUpload }),
-        signal: controller.signal,
-      });
+        setUploadStageText('جاري التحليل المالي للنصوص...');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-      clearTimeout(timeoutId);
+        try {
+          const res = await fetch('/api/v1/receipts/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: itemsToUpload }),
+            signal: controller.signal,
+          });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'فشل رفع الإيصالات ومعالجتها بالـ OCR');
-      }
+          clearTimeout(timeoutId);
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.error || 'فشلت معالجة نصوص الإيصالات');
+          }
 
-      const returned = data.data || [];
-      const dupCount = returned.filter((r: any) => r.isDuplicate || r.status === 'duplicate').length;
-      const suspCount = returned.filter((r: any) => r.isSuspicious || r.status === 'suspicious').length;
-      const reviewCount = returned.filter((r: any) => r.status === 'pending_review' || r.ocrConfidence < 70).length;
+          const returned = data.data || [];
+          const dupCount = returned.filter((r: any) => r.isDuplicate || r.status === 'duplicate').length;
+          const suspCount = returned.filter((r: any) => r.isSuspicious || r.status === 'suspicious').length;
+          const reviewCount = returned.filter((r: any) => r.status === 'pending_review' || r.ocrConfidence < 70).length;
 
-      setUploadSummary({
-        total: returned.length,
-        success: returned.length - dupCount,
-        duplicates: dupCount,
-        suspicious: suspCount,
-        needsReview: reviewCount,
-        message: `تم رفع ومعالجة ${returned.length} إيصال بنجاح وسرعة فائقة عبر محرك الـ OCR!`,
-      });
+          setUploadSummary({
+            total: returned.length,
+            success: returned.length - dupCount,
+            duplicates: dupCount,
+            suspicious: suspCount,
+            needsReview: reviewCount,
+            message: `تمت معالجة وتدقيق ${returned.length} إشعار بنجاح!`,
+          });
 
-      clearAllFiles();
-      setBatchReceiptsText('');
-      fetchReceipts();
+          setBatchReceiptsText('');
+          fetchReceipts();
 
-      // Auto close after brief display if everything is clean
-      setTimeout(() => {
-        if (dupCount === 0 && suspCount === 0) {
-          setUploadModalOpen(false);
-          setUploadSummary(null);
+          if (dupCount === 0 && suspCount === 0) {
+            setTimeout(() => {
+              setUploadModalOpen(false);
+              setUploadSummary(null);
+            }, 2000);
+          }
+        } catch (textErr: any) {
+          clearTimeout(timeoutId);
+          throw textErr;
         }
-      }, 2500);
+      }
     } catch (err: any) {
-      clearTimeout(timeoutId);
-      const isTimeout = err.name === 'AbortError';
       setUploadSummary({
         total: 0,
         success: 0,
         duplicates: 0,
         suspicious: 0,
         needsReview: 0,
-        message: isTimeout
-          ? 'استغرقت المعالجة وقتاً أطول من المتوقع على الشبكة — تم تحويل العملية ويمكنك مراجعة وتعديل بيانات الإيصال يدوياً دون أي تعليق'
-          : `خطأ: ${err.message}`,
+        message: `خطأ: ${err.message}`,
       });
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       setUploadStageText('جاري المعالجة واستخراج الـ OCR...');
     }
   };
@@ -924,6 +1024,27 @@ export default function ReceiptsPage() {
                 </button>
               </div>
 
+              {/* Live Real-time Upload & OCR Progress Bar */}
+              {uploadProgress && (
+                <div className="mb-4 p-3.5 bg-blue-50/95 border border-blue-200/80 rounded-2xl text-blue-950 shadow-sm animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between text-xs font-bold mb-2">
+                    <div className="flex items-center space-x-2 space-x-reverse">
+                      <RefreshCw className="w-3.5 h-3.5 text-blue-600 animate-spin shrink-0" />
+                      <span className="text-blue-900">{uploadStageText}</span>
+                    </div>
+                    <span className="font-mono text-blue-700 font-black">
+                      {uploadProgress.current} / {uploadProgress.total} ({Math.round((uploadProgress.current / uploadProgress.total) * 100)}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-blue-200/60 rounded-full h-2.5 overflow-hidden">
+                    <div
+                      className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Upload Summary Report Banner */}
               {uploadSummary && (
                 <div className={`mb-4 p-4 rounded-2xl border text-xs sm:text-sm ${
@@ -1085,19 +1206,41 @@ export default function ReceiptsPage() {
                                 />
                                 <div className="min-w-0">
                                   <p className="text-xs font-bold text-slate-800 truncate">{item.name}</p>
-                                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                    صورة #{idx + 1} • {item.sizeFormatted}
-                                  </p>
+                                  <div className="flex items-center space-x-2 space-x-reverse mt-0.5">
+                                    <p className="text-[10px] text-slate-400 font-mono">
+                                      صورة #{idx + 1} • {item.sizeFormatted}
+                                    </p>
+                                    {item.status === 'uploading' && (
+                                      <span className="inline-flex items-center space-x-1 space-x-reverse text-[10px] text-blue-700 bg-blue-100/80 px-1.5 py-0.5 rounded font-bold animate-pulse">
+                                        <RefreshCw className="w-2.5 h-2.5 animate-spin shrink-0" />
+                                        <span>جاري التحليل...</span>
+                                      </span>
+                                    )}
+                                    {item.status === 'success' && (
+                                      <span className="inline-flex items-center space-x-1 space-x-reverse text-[10px] text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded font-bold">
+                                        <CheckCircle className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                        <span>تم الاستخراج</span>
+                                      </span>
+                                    )}
+                                    {item.status === 'error' && (
+                                      <span className="inline-flex items-center space-x-1 space-x-reverse text-[10px] text-rose-700 bg-rose-100/80 px-1.5 py-0.5 rounded font-bold" title={item.errorMessage}>
+                                        <AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                        <span>فشلت القراءة</span>
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => removeFile(item.id)}
-                                className="p-2 text-slate-400 hover:text-rose-600 rounded-lg min-w-[36px] min-h-[36px] flex items-center justify-center shrink-0"
-                                title="إزالة الصورة"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {!uploading && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeFile(item.id)}
+                                  className="p-2 text-slate-400 hover:text-rose-600 rounded-lg min-w-[36px] min-h-[36px] flex items-center justify-center shrink-0"
+                                  title="إزالة الصورة"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           ))}
                         </div>
