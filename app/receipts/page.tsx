@@ -1043,14 +1043,13 @@ export default function ReceiptsPage() {
                   <th className="p-3.5">العميل المرتبط</th>
                   <th className="p-3.5">التاريخ والوقت</th>
                   <th className="p-3.5">دقة OCR</th>
-                  <th className="p-3.5">الحالة</th>
                   <th className="p-3.5 text-center">الإجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {receipts.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="text-center py-12 text-slate-400">
+                    <td colSpan={8} className="text-center py-12 text-slate-400">
                       {loading ? 'جاري تحميل الإيصالات...' : 'لا توجد إيصالات تطابق البحث'}
                     </td>
                   </tr>
@@ -1136,10 +1135,7 @@ export default function ReceiptsPage() {
                         </span>
                       </td>
 
-                      {/* 8. الحالة */}
-                      <td className="p-3.5">{getStatusBadge(rcp.status)}</td>
-
-                      {/* 9. الإجراءات */}
+                      {/* 8. الإجراءات */}
                       <td className="p-3.5 text-center">
                         <button
                           onClick={() => openReview(rcp)}
