@@ -1,5 +1,14 @@
 import crypto from 'crypto';
 
+export interface ConfidenceBreakdown {
+  transactionIdConfidence: number; // 0 - 25
+  amountConfidence: number;        // 0 - 25
+  recipientConfidence: number;     // 0 - 25
+  accountConfidence: number;       // 0 - 15
+  dateConfidence: number;          // 0 - 10
+  overall: number;                 // 0 - 100
+}
+
 export interface ParsedBankakReceipt {
   transactionId: string;
   amount: number;
@@ -19,6 +28,7 @@ export interface ParsedBankakReceipt {
   receiverNameValid?: boolean;
   dateValid?: boolean;
   accountsValid?: boolean;
+  confidenceBreakdown?: ConfidenceBreakdown;
 }
 
 /**
@@ -93,52 +103,88 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   const cleanName = (raw: string): string => {
     if (!raw) return '';
     let c = raw.trim();
-    c = c.replace(/^(?:[إأآا]?سم\s*(?:المرسل\s*[إأآا]?لي[هة]|المستفيد|المستلم)|المرسل\s*[إأآا]?لي[هة]|المستفيد|المستلم|[إا]لى|[إأآا]?سم\s*(?:المرسل|العميل)|المرسل)[\s:]*/i, '');
+    // Strip common labels and OCR artifacts (eee, ere, ofc, ooo, Jara eal, etc.)
+    c = c.replace(/^(?:[إأآا]?سم\s*(?:المرسل\s*[إأآا]?لي[هة]|المرسل|المستفيد|المستلم)|المرسل\s*[إأآا]?لي[هة]|المستفيد|المستلم|[إا]لى|Jara\s*eal|eal|[eE]{2,4}|[oO]{2,4}|ofc|ere)[\s:]*/i, '');
+    c = c.replace(/^[a-zA-Z\s]{1,6}\s+/i, ''); // Strip stray English letters
     c = c.replace(/^[ا-ي]\s+امل\s+/i, ''); // Tesseract artifact where "إسم المرسل اليه" is misread as "ا امل"
     c = c.split(/\s{2,}|[-|\n\r]/)[0].trim();
     if (
       !c ||
-      /^(?:حساب|الحساب|من\s*حساب|[إأآا]لى\s*حساب|account|n\/a|تحويلات|بنك|مشاركة|طباعة|تحميل|إضافة|التعليق)/i.test(c) ||
+      /^(?:حساب|الحساب|من\s*حساب|[إأآا]لى\s*حساب|account|n\/a|تحويلات|بنك|مشاركة|طباعة|تحميل|إضافة|التعليق|رقم|المبلغ)/i.test(c) ||
       /^[0-9\s\*\-]+$/.test(c) ||
-      c.length <= 2
+      c.length <= 3
     ) {
       return '';
     }
     return c;
   };
 
-  // 1. Transaction ID
+  // 1. Transaction ID (Strict 10-16 digits, NOT a date or time)
   let transactionId = '';
-  const txnPatterns = [
-    /(?:Transaction\s*(?:ID|No|Ref|Reference)|Ref(?:erence)?|TXN|رقم\s*(?:العملية|المرجع|الإشعار|المعاملة)|الرقم\s*المرجعي|معرف\s*العملية)[\s:]*([A-Za-z0-9\-_]+)/i,
-    /(FT[0-9]{8,20})/i,
-    /\b(20[0-9]{9})\b/, // 11-digit standard Bankak reference starting with 20
-    /\b([0-9]{10,12})\b/,
-  ];
-  for (const pattern of txnPatterns) {
-    const match = normalized.match(pattern);
-    if (match) {
-      transactionId = match[1] || match[0];
-      fieldsMatched++;
-      break;
+  const txnLabeled = normalized.match(/(?:Transaction\s*(?:ID|No|Ref|Reference)|رقم\s*(?:العملية|المرجع|الإشعار|المعاملة)|الرقم\s*المرجعي|معرف\s*العملية)[\s:]*([A-Za-z0-9\-_]+)/i);
+  if (txnLabeled && txnLabeled[1]) {
+    const val = txnLabeled[1].replace(/[^0-9A-Za-z]/g, '');
+    if (val.length >= 8 && !/^[0-9]{1,2}-[A-Za-z]{3}/.test(val)) {
+      transactionId = val;
     }
   }
+  if (!transactionId) {
+    // Standard Bank of Khartoum 11-digit reference starting with 20 or 21
+    const matchBankak = normalized.match(/\b(2[01][0-9]{9,10})\b/);
+    if (matchBankak) {
+      transactionId = matchBankak[1];
+    }
+  }
+  if (!transactionId) {
+    const matchAny = normalized.match(/\b([0-9]{10,12})\b/);
+    if (matchAny) {
+      transactionId = matchAny[1];
+    }
+  }
+  if (transactionId) fieldsMatched++;
 
   // 2. Beneficiary / Receiver Name
+  // Note: Bankak receipts ONLY print the recipient's name ("إسم المرسل إليه"). They NEVER print the sender's name!
   let receiverName = '';
+  // Strategy A: Labeled beneficiary line
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (/(?:[إأآا]?سم\s*المرسل\s*[إأآا]?لي[هة]|[إأآا]?سم\s*المستفيد|المرسل\s*[إأآا]?لي[هة]|المستفيد|المستلم)/i.test(line)) {
+    if (/(?:[إأآا]?سم\s*المرسل(?:\s*[إأآا]?لي[هة])?|[إأآا]?سم\s*المستفيد|المستفيد\b|المرسل\s*[إأآا]?لي[هة])/i.test(line)) {
       const cleaned = cleanName(line);
-      if (cleaned) {
+      if (cleaned && cleaned.split(/\s+/).length >= 2) {
         receiverName = cleaned;
         break;
       }
       if (i + 1 < lines.length) {
         const nextCleaned = cleanName(lines[i + 1]);
-        if (nextCleaned) {
+        if (nextCleaned && nextCleaned.split(/\s+/).length >= 2) {
           receiverName = nextCleaned;
           break;
+        }
+      }
+    }
+  }
+
+  // Strategy B: Positional extraction (located between "إلى حساب" and "المبلغ" / "رقم الموبايل")
+  if (!receiverName) {
+    let toAccountIdx = -1;
+    let amountIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (/[إا]لى\s*(?:حساب|elles|0ك)|To\s*Account/i.test(lines[i])) toAccountIdx = i;
+      if (/المبلغ|Amount|رقم\s*الموبايل/i.test(lines[i])) {
+        if (amountIdx === -1) amountIdx = i;
+      }
+    }
+
+    if (toAccountIdx !== -1) {
+      const endLimit = amountIdx !== -1 ? amountIdx : Math.min(toAccountIdx + 4, lines.length);
+      for (let i = toAccountIdx + 1; i <= endLimit; i++) {
+        if (i < lines.length) {
+          const candidate = cleanName(lines[i]);
+          if (candidate && candidate.split(/\s+/).length >= 2 && /[\u0600-\u06FF]/.test(candidate)) {
+            receiverName = candidate;
+            break;
+          }
         }
       }
     }
@@ -206,7 +252,7 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
 
   if (amountValid) fieldsMatched++;
 
-  // 4. Accounts (From Account / To Account)
+  // 4. Accounts (From Account / To Account) - preserving leading zeros
   let senderAccount = '';
   let receiverAccount = '';
   for (let i = 0; i < lines.length; i++) {
@@ -219,8 +265,8 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
         senderAccount = lines[i + 1].replace(/\s+/g, '');
       }
     }
-    if (/[إا]لى\s*حساب|To\s*Account/i.test(line)) {
-      const match = line.match(/(?:[إا]لى\s*حساب|To\s*Account)[\s:]*([0-9\s]{6,30})/i);
+    if (/[إا]لى\s*(?:حساب|elles|0ك)|To\s*Account/i.test(line)) {
+      const match = line.match(/(?:[إا]لى\s*(?:حساب|elles|0ك)|To\s*Account)[\s:]*([0-9\s]{6,30})/i);
       if (match) {
         receiverAccount = match[1].replace(/\s+/g, '');
       } else if (i + 1 < lines.length && /^[0-9\s]{6,30}$/.test(lines[i + 1])) {
@@ -232,19 +278,8 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   if (senderAccount) fieldsMatched++;
   if (receiverAccount) fieldsMatched++;
 
-  // 5. Sender Name
+  // 5. Sender Name (Optional - empty in Bankak transfers)
   let senderName = '';
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/(?:[إأآا]?سم\s*المرسل|[إأآا]?سم\s*العميل|المرسل\b)/i.test(line) && !/المرسل\s*[إأآا]?لي[هة]/i.test(line)) {
-      const cleaned = cleanName(line);
-      if (cleaned) {
-        senderName = cleaned;
-        fieldsMatched++;
-        break;
-      }
-    }
-  }
 
   // 6. Date & Time Validation
   let dateMatched = false;
@@ -258,7 +293,7 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
     fieldsMatched++;
   }
 
-  // Strict named month date: e.g. "16-Nov-2026" or "15 Nov 2026"
+  // Strict named month date: e.g. "17-Nov-2026", "16-Nov-2026", "15 Nov 2026"
   const namedMatch = normalized.match(/\b([0-9]{1,2})[\s\-\/\.]([A-Za-z\u0621-\u064A]{3,9})[\s\-\/\.]([0-9]{4})\b/i);
   if (namedMatch) {
     const d = parseInt(namedMatch[1], 10);
@@ -294,20 +329,24 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
     }
   }
 
-  // If date is unreadable or obscured in the image, NEVER invent a fake or impossible date!
-  // Leave transactionDate empty so the user or verification step can supply it accurately.
-
-  // 7. Calculate Verified OCR Confidence
-  // Essential: Transaction ID (25%), Valid Amount (25%), Verified Beneficiary (25%), Accounts (15%), Date (10%)
-  let confidence = 0;
-  if (transactionId) confidence += 25;
-  if (amountValid) confidence += 25;
-  if (receiverName && receiverName.length > 2) confidence += 25;
-  if (senderAccount || receiverAccount) confidence += 15;
-  if (dateMatched) confidence += 10;
-
+  // 7. Calculate Granular Confidence Breakdown
+  const receiverNameValid = Boolean(receiverName && receiverName.length > 3);
   const accountsValid = senderAccount.length >= 6 || receiverAccount.length >= 6;
-  const receiverNameValid = Boolean(receiverName && receiverName.length > 2);
+
+  const confidenceBreakdown: ConfidenceBreakdown = {
+    transactionIdConfidence: transactionId ? 25 : 0,
+    amountConfidence: amountValid ? 25 : 0,
+    recipientConfidence: receiverNameValid ? 25 : 0,
+    accountConfidence: accountsValid ? 15 : 0,
+    dateConfidence: dateMatched ? 10 : 0,
+    overall: 0,
+  };
+  confidenceBreakdown.overall =
+    confidenceBreakdown.transactionIdConfidence +
+    confidenceBreakdown.amountConfidence +
+    confidenceBreakdown.recipientConfidence +
+    confidenceBreakdown.accountConfidence +
+    confidenceBreakdown.dateConfidence;
 
   return {
     transactionId: transactionId || '',
@@ -321,15 +360,79 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
     transactionDate,
     transactionTime: transactionTime || '12:00:00',
     bankName: 'بنكك - بنك الخرطوم (Bank of Khartoum)',
-    ocrConfidence: confidence,
+    ocrConfidence: confidenceBreakdown.overall,
     rawText: rawInput,
     extractedFieldsCount: fieldsMatched,
     amountValid,
     receiverNameValid,
     dateValid: dateMatched,
     accountsValid,
+    confidenceBreakdown,
   };
 }
+
+/**
+ * Merges best extracted fields from multi-mode OCR passes (e.g. PSM 4 and PSM 11)
+ */
+export function mergeParsedResults(p1: ParsedBankakReceipt, p2: ParsedBankakReceipt): ParsedBankakReceipt {
+  const isP1TxnValid = Boolean(p1.transactionId && p1.transactionId.length >= 8 && !/^[0-9]{1,2}-[A-Za-z]{3}/.test(p1.transactionId));
+  const isP2TxnValid = Boolean(p2.transactionId && p2.transactionId.length >= 8 && !/^[0-9]{1,2}-[A-Za-z]{3}/.test(p2.transactionId));
+  const transactionId = isP1TxnValid ? p1.transactionId : (isP2TxnValid ? p2.transactionId : '');
+
+  const amountValid = p1.amountValid || p2.amountValid;
+  const amount = p1.amountValid ? p1.amount : (p2.amountValid ? p2.amount : 0);
+
+  const receiverName = p1.receiverNameValid ? p1.receiverName : (p2.receiverNameValid ? p2.receiverName : '');
+  const receiverNameValid = Boolean(receiverName && receiverName.length > 3);
+
+  const senderName = p1.senderName || p2.senderName || '';
+  const senderAccount = (p1.senderAccount && p1.senderAccount.length >= 6) ? p1.senderAccount : (p2.senderAccount || '');
+  const receiverAccount = (p1.receiverAccount && p1.receiverAccount.length >= 6) ? p1.receiverAccount : (p2.receiverAccount || '');
+  const accountsValid = Boolean(senderAccount.length >= 6 || receiverAccount.length >= 6);
+
+  const dateValid = p1.dateValid || p2.dateValid;
+  const transactionDate = p1.dateValid ? p1.transactionDate : (p2.dateValid ? p2.transactionDate : '');
+  const transactionTime = p1.transactionTime && p1.transactionTime !== '12:00:00' ? p1.transactionTime : (p2.transactionTime || '12:00:00');
+
+  const confidenceBreakdown: ConfidenceBreakdown = {
+    transactionIdConfidence: transactionId ? 25 : 0,
+    amountConfidence: amountValid ? 25 : 0,
+    recipientConfidence: receiverNameValid ? 25 : 0,
+    accountConfidence: accountsValid ? 15 : 0,
+    dateConfidence: dateValid ? 10 : 0,
+    overall: 0,
+  };
+  confidenceBreakdown.overall =
+    confidenceBreakdown.transactionIdConfidence +
+    confidenceBreakdown.amountConfidence +
+    confidenceBreakdown.recipientConfidence +
+    confidenceBreakdown.accountConfidence +
+    confidenceBreakdown.dateConfidence;
+
+  return {
+    transactionId: transactionId || '',
+    amount,
+    amountNeedsReview: !amountValid || amount <= 0,
+    currency: 'SDG',
+    senderName,
+    senderAccount,
+    receiverName,
+    receiverAccount,
+    transactionDate,
+    transactionTime,
+    bankName: 'بنكك - بنك الخرطوم (Bank of Khartoum)',
+    ocrConfidence: confidenceBreakdown.overall,
+    rawText: `${p1.rawText}\n--- Secondary OCR ---\n${p2.rawText}`,
+    extractedFieldsCount: Math.max(p1.extractedFieldsCount, p2.extractedFieldsCount),
+    amountValid,
+    receiverNameValid,
+    dateValid,
+    accountsValid,
+    confidenceBreakdown,
+  };
+}
+
+
 
 export interface ReceiptRiskAssessment {
   isDuplicate: boolean;

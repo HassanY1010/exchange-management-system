@@ -1,7 +1,7 @@
 import { createWorker, Worker } from 'tesseract.js';
 import path from 'path';
 import fs from 'fs';
-import { parseBankakReceiptText, computeImageHash, ParsedBankakReceipt } from './bankak-parser';
+import { parseBankakReceiptText, mergeParsedResults, computeImageHash, ParsedBankakReceipt } from './bankak-parser';
 
 export interface OcrProcessingResult {
   parsed: ParsedBankakReceipt;
@@ -86,16 +86,19 @@ class OcrWorkerManager {
     }
   }
 
-  public async recognizeWithTimeout(imageInput: Buffer, timeoutMs = 15000): Promise<string> {
+  public async recognizeWithMode(imageInput: Buffer, psm = '4', timeoutMs = 15000): Promise<string> {
     return new Promise((resolve, reject) => {
       this.queue = this.queue.catch(() => {}).then(async () => {
         let timer: NodeJS.Timeout | null = null;
         try {
           const worker = await this.getWorker();
+          try {
+            await worker.setParameters({ tessedit_pageseg_mode: psm as any });
+          } catch (e) {}
 
           const timeoutPromise = new Promise<never>((_, rej) => {
             timer = setTimeout(() => {
-              rej(new Error(`OCR recognition timed out after ${timeoutMs}ms`));
+              rej(new Error(`OCR recognition timed out after ${timeoutMs}ms (PSM ${psm})`));
             }, timeoutMs);
           });
 
@@ -112,6 +115,10 @@ class OcrWorkerManager {
         }
       });
     });
+  }
+
+  public async recognizeWithTimeout(imageInput: Buffer, timeoutMs = 15000): Promise<string> {
+    return this.recognizeWithMode(imageInput, '4', timeoutMs);
   }
 
   public async recycleWorker(): Promise<void> {
@@ -192,14 +199,27 @@ export async function processReceiptImageWithOcr(
       imageInput = imageBufferOrBase64;
     }
 
-    // Recognize with 15-second strict timeout guard to prevent infinite hanging
-    const rawText = await ocrWorkerManager.recognizeWithTimeout(imageInput, 15000);
-    const parsed = parseBankakReceiptText(rawText);
+    // Pass 1: Primary fast recognition using PSM 4
+    const rawText1 = await ocrWorkerManager.recognizeWithMode(imageInput, '4', 15000);
+    let parsed = parseBankakReceiptText(rawText1);
+    let combinedRawText = rawText1;
+
+    // Pass 2: If beneficiary name or transaction date is missing, run secondary pass with PSM 11 (Sparse text)
+    if (!parsed.receiverNameValid || !parsed.dateValid) {
+      try {
+        const rawText2 = await ocrWorkerManager.recognizeWithMode(imageInput, '11', 12000);
+        const parsed2 = parseBankakReceiptText(rawText2);
+        parsed = mergeParsedResults(parsed, parsed2);
+        combinedRawText = `${rawText1}\n--- Secondary OCR (PSM 11) ---\n${rawText2}`;
+      } catch (err: any) {
+        console.warn('[OCR Secondary Pass Notice]:', err?.message || err);
+      }
+    }
 
     return {
       parsed,
       imageHash,
-      rawText,
+      rawText: combinedRawText,
       engineUsed: 'tesseract',
       durationMs: Date.now() - startTime,
     };
