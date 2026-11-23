@@ -73,11 +73,16 @@ function LoginForm() {
   return (
     <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-5 sm:p-8 border border-slate-100" dir="rtl">
       <div className="text-center mb-6 sm:mb-8">
-        <div className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-blue-500/30">
-          <ArrowLeftRight className="w-7 h-7 sm:w-8 sm:h-8 text-white" />
+        <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-slate-200/80 p-2 border border-slate-100 overflow-hidden">
+          <img
+            src="/brand/logo.png"
+            alt="أبو جواد للتجارة"
+            className="w-full h-full object-contain"
+          />
         </div>
-        <h1 className="text-xl sm:text-2xl font-black text-slate-900 mb-1">منصة الصرافة والتحويلات المالية</h1>
-        <p className="text-xs sm:text-sm text-slate-500">نظام إدارة العملات، إيصالات بنكك والمحاسبة المركزية</p>
+        <h1 className="text-2xl sm:text-3xl font-black text-slate-900 mb-1">أبو جواد للتجارة</h1>
+        <p className="text-xs sm:text-sm font-bold text-amber-600 tracking-wider font-mono uppercase mb-1">ABU JAWAD FOR TRADEING</p>
+        <p className="text-xs sm:text-sm text-slate-500">نظام إدارة الصرافة والمحاسبة المالية المركزية</p>
       </div>
 
       {error && (

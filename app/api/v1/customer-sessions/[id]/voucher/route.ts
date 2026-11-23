@@ -33,7 +33,8 @@ export async function GET(
     data: {
       ...voucher,
       company: {
-        name: settings.company_name || 'شركة النجم لخدمات الصرافة والتحويلات المالية',
+        name: settings.company_name || 'أبو جواد للتجارة (ABU JAWAD FOR TRADEING)',
+        logo: settings.company_logo || '/brand/logo.png',
         phone: settings.company_phone || '+20 100 000 0000',
         address: settings.company_address || 'القاهرة، جمهورية مصر العربية',
         taxNumber: settings.company_tax_number || '100-200-300',

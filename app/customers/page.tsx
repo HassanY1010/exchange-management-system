@@ -567,13 +567,24 @@ export default function CustomersPage() {
               ) : statementData && (
                 <div className="print-area space-y-4 sm:space-y-6">
                   {/* Official Letterhead */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b-2 border-slate-900 pb-3 gap-2">
-                    <div>
-                      <h2 className="text-base sm:text-xl font-black text-slate-900">
-                        {statementData.companyName}
-                      </h2>
-                      <p className="text-xs text-slate-500">نظام إدارة العملات والتحويلات المركزية</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">سجل تجاري معتمد • القاهرة • هاتف: +201000000001</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b-2 border-slate-900 pb-3 gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-white rounded-xl border border-slate-200 p-1 flex items-center justify-center shrink-0 shadow-xs overflow-hidden">
+                        <img
+                          src="/brand/logo.png"
+                          alt="أبو جواد للتجارة"
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-base sm:text-xl font-black text-slate-900">
+                            {statementData.companyName || 'أبو جواد للتجارة (ABU JAWAD FOR TRADEING)'}
+                          </h2>
+                        </div>
+                        <p className="text-xs text-slate-500">نظام إدارة العملات والتحويلات المركزية</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">سجل تجاري معتمد • المركز الرئيسي • هاتف: {statementData.company?.phone || '+20 100 000 0000'}</p>
+                      </div>
                     </div>
                     <div className="text-right sm:text-left font-mono text-xs border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200">
                       <div className="font-bold text-slate-900 text-sm">كشف حساب عميل معتمد</div>

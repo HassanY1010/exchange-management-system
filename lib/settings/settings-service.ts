@@ -22,7 +22,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     labelAr: 'اسم المنشأة / مكتب الصرافة',
     descriptionAr: 'الاسم الرسمي المعتمد للمؤسسة في كافة التقارير وسندات الصرف وكشوفات الحسابات',
     type: 'text',
-    defaultValue: 'شركة النجم لخدمات الصرافة والتحويلات المالية',
+    defaultValue: 'أبو جواد للتجارة (ABU JAWAD FOR TRADEING)',
+  },
+  {
+    key: 'company_logo',
+    category: 'organization',
+    labelAr: 'شعار المنشأة / الهوية البصرية',
+    descriptionAr: 'مسار أو رابط الشعار المعتمد المطبوع على التقارير وسندات الصرف وكشوف الحساب',
+    type: 'text',
+    defaultValue: '/brand/logo.png',
   },
   {
     key: 'company_phone',

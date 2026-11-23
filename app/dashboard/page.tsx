@@ -65,6 +65,13 @@ export default function DashboardPage() {
         {/* Top Header & Refresh */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-amber-50 border border-amber-200/80 rounded-full mb-1.5 shadow-xs">
+              <div className="w-4 h-4 rounded-full bg-white flex items-center justify-center p-0.5 shrink-0 overflow-hidden shadow-xs border border-amber-200">
+                <img src="/brand/logo.png" alt="أبو جواد للتجارة" className="w-full h-full object-contain" />
+              </div>
+              <span className="text-xs font-bold text-amber-900">أبو جواد للتجارة</span>
+              <span className="text-[10px] text-amber-600/80 font-mono tracking-wider">| ABU JAWAD FOR TRADEING</span>
+            </div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 leading-tight">لوحة التحكم والمؤشرات المالية</h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
               نظرة شاملة ولحظية على أرصدة السيولة النقدية، إيصالات بنكك والعهد

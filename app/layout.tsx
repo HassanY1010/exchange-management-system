@@ -2,8 +2,13 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'منصة إدارة الصرافة والتحويلات المالية والمحاسبة',
-  description: 'نظام مالي ومحاسبي متكامل لإدارة نشاط الصرافة وإيصالات بنكك والعهد والموردين والإغلاق اليومي',
+  title: 'أبو جواد للتجارة | منصة إدارة الصرافة والتحويلات المالية',
+  description: 'أبو جواد للتجارة (ABU JAWAD FOR TRADEING) - نظام مالي ومحاسبي متكامل لإدارة نشاط الصرافة وإيصالات بنكك والعهد والموردين والإغلاق اليومي',
+  icons: {
+    icon: '/brand/logo.png',
+    shortcut: '/brand/logo.png',
+    apple: '/brand/logo.png',
+  },
 };
 
 export const viewport: Viewport = {

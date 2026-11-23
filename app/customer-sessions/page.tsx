@@ -890,7 +890,15 @@ export default function CustomerSessionsPage() {
               {/* Official Voucher Printable Card */}
               <div className="border-2 border-slate-900 rounded-2xl p-6 space-y-4 bg-white text-slate-900">
                 <div className="text-center pb-4 border-b-2 border-slate-900">
-                  <h2 className="text-lg font-black tracking-tight">شركة الصرافة والتحويلات المالية المعتمدة</h2>
+                  <div className="w-14 h-14 bg-white rounded-xl border border-slate-200 p-1 flex items-center justify-center mx-auto mb-2 shadow-xs overflow-hidden">
+                    <img
+                      src="/brand/logo.png"
+                      alt="أبو جواد للتجارة"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <h2 className="text-lg font-black tracking-tight">أبو جواد للتجارة</h2>
+                  <p className="text-[11px] font-bold text-amber-700 tracking-wider font-mono uppercase">ABU JAWAD FOR TRADEING</p>
                   <p className="text-xs text-slate-600 mt-0.5">سند صرف وتسليم نقدية لعميل (Cash Payout Voucher)</p>
                   <div className="mt-2 inline-block font-mono font-bold text-xs bg-slate-100 px-3 py-1 rounded-full border border-slate-300">
                     رقم السند: {activeVoucher.voucherNumber}

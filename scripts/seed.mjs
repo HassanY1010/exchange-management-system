@@ -259,7 +259,8 @@ async function main() {
 
   // 10. System Settings
   const settings = [
-    { key: 'company_name', value: 'شركة النجم لخدمات الصرافة والتحويلات المالية', description: 'اسم المؤسسة' },
+    { key: 'company_name', value: 'أبو جواد للتجارة (ABU JAWAD FOR TRADEING)', description: 'اسم المؤسسة' },
+    { key: 'company_logo', value: '/brand/logo.png', description: 'شعار المؤسسة' },
     { key: 'company_phone', value: '+20 100 000 0000', description: 'هاتف التواصل الرئيسي' },
     { key: 'company_address', value: 'القاهرة، جمهورية مصر العربية', description: 'العنوان والمقر الرئيسي' },
     { key: 'company_tax_number', value: '100-200-300', description: 'الرقم الضريبي والسجل التجاري' },

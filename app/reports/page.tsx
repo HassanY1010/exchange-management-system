@@ -546,24 +546,36 @@ export default function ReportsPage() {
         {/* PRINTABLE REPORT CANVAS */}
         <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 p-4 sm:p-8 shadow-sm print:border-none print:shadow-none min-h-[500px]">
           {/* Formal Official Header */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b-2 border-slate-900 pb-4 mb-6 gap-2">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg sm:text-xl font-black text-slate-900">
-                  شركة النجم لخدمات الصرافة والتحويلات المالية
-                </h2>
-                <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                  نظام الأستاذ العام المعتمد
-                </span>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b-2 border-slate-900 pb-4 mb-6 gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-14 h-14 bg-white rounded-xl border border-slate-200 p-1 flex items-center justify-center shrink-0 shadow-xs overflow-hidden">
+                <img
+                  src="/brand/logo.png"
+                  alt="أبو جواد للتجارة"
+                  className="w-full h-full object-contain"
+                />
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {activeTab === 'profit_loss' && 'قائمة الأرباح والخسائر الرسمية (Profit & Loss Statement)'}
-                {activeTab === 'balance_sheet' && 'الميزانية العمومية كما في نهاية الفترة (Balance Sheet)'}
-                {activeTab === 'trial_balance' && 'ميزان المراجعة بالأرصدة والمجاميع (Trial Balance)'}
-                {activeTab === 'cash_flow' && 'قائمة التدفقات النقدية التشغيلية والتمويلية (Cash Flows)'}
-                {activeTab === 'balances' && 'كشف الأرصدة الحالية للصناديق والحسابات المصرفية'}
-                {activeTab === 'ledger' && 'سجل حركات وقيود دفتر الأستاذ العام (General Ledger Audit)'}
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg sm:text-xl font-black text-slate-900">
+                    أبو جواد للتجارة
+                  </h2>
+                  <span className="text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full font-mono uppercase">
+                    ABU JAWAD FOR TRADEING
+                  </span>
+                  <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                    نظام الأستاذ العام المعتمد
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {activeTab === 'profit_loss' && 'قائمة الأرباح والخسائر الرسمية (Profit & Loss Statement)'}
+                  {activeTab === 'balance_sheet' && 'الميزانية العمومية كما في نهاية الفترة (Balance Sheet)'}
+                  {activeTab === 'trial_balance' && 'ميزان المراجعة بالأرصدة والمجاميع (Trial Balance)'}
+                  {activeTab === 'cash_flow' && 'قائمة التدفقات النقدية التشغيلية والتمويلية (Cash Flows)'}
+                  {activeTab === 'balances' && 'كشف الأرصدة الحالية للصناديق والحسابات المصرفية'}
+                  {activeTab === 'ledger' && 'سجل حركات وقيود دفتر الأستاذ العام (General Ledger Audit)'}
+                </p>
+              </div>
             </div>
             <div className="text-right sm:text-left font-mono text-xs text-slate-500">
               <div>تاريخ التقرير: {new Date().toLocaleDateString('ar-EG')}</div>

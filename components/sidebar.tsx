@@ -59,12 +59,16 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
       {/* Brand Header */}
       <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
         <div className="flex items-center space-x-3 space-x-reverse min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-md shadow-blue-500/20 shrink-0">
-            <ArrowLeftRight className="w-5 h-5 text-white" />
+          <div className="w-11 h-11 rounded-xl bg-white p-1 flex items-center justify-center shadow-md shadow-slate-950/30 shrink-0 border border-slate-700/50 overflow-hidden">
+            <img
+              src="/brand/logo.png"
+              alt="أبو جواد للتجارة"
+              className="w-full h-full object-contain"
+            />
           </div>
           <div className="min-w-0">
-            <h1 className="font-bold text-base leading-tight text-white truncate">منصة الصرافة</h1>
-            <p className="text-xs text-slate-400 truncate">إدارة العملات وإيصالات بنكك</p>
+            <h1 className="font-black text-base leading-tight text-white truncate">أبو جواد للتجارة</h1>
+            <p className="text-[11px] text-amber-400 font-semibold tracking-wide truncate">ABU JAWAD FOR TRADEING</p>
           </div>
         </div>
 
