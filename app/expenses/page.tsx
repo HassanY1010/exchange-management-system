@@ -52,6 +52,16 @@ export default function ExpensesPage() {
   const [ledgerModalOpen, setLedgerModalOpen] = useState(false);
   const [selectedExpenseForLedger, setSelectedExpenseForLedger] = useState<any | null>(null);
 
+  // Reject Modal
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [expenseToReject, setExpenseToReject] = useState<any | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  // Current User for SoD checks
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
   const fetchExpenses = () => {
     setLoading(true);
     fetch('/api/v1/expenses')
@@ -64,6 +74,15 @@ export default function ExpensesPage() {
       })
       .catch((err) => console.error('Failed to fetch expenses:', err))
       .finally(() => setLoading(false));
+
+    fetch('/api/v1/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.user) {
+          setCurrentUser(data.user);
+        }
+      })
+      .catch(() => {});
 
     fetch('/api/v1/expenses/categories')
       .then((res) => res.json())
@@ -174,6 +193,69 @@ export default function ExpensesPage() {
     }
   };
 
+  const handleApproveExpense = async (exp: any) => {
+    // Check SoD on client side to guide user
+    const isCreator =
+      currentUser &&
+      exp.createdBy &&
+      (exp.createdBy.toLowerCase() === currentUser.name?.toLowerCase() ||
+        exp.createdBy.toLowerCase() === currentUser.email?.toLowerCase());
+
+    if (isCreator && currentUser?.role !== 'admin') {
+      alert('مبدأ فصل المهام (Segregation of Duties):\nلا يمكنك اعتماد مصروف قمت بإنشائه بنفسك. يجب اعتماده من قبل محاسب آخر أو مدير النظام.');
+      return;
+    }
+
+    if (!confirm(`هل أنت متأكد من اعتماد وصرف المصروف (${exp.expenseNumber}) بمبلغ ${exp.amount.toLocaleString()} ${exp.currency} والخصم من الصندوق؟`)) {
+      return;
+    }
+
+    setApprovingId(exp.id);
+    try {
+      const res = await fetch(`/api/v1/expenses/${exp.id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'فشل اعتماد المصروف');
+      }
+
+      fetchExpenses();
+    } catch (err: any) {
+      alert(err.message || 'خطأ أثناء اعتماد المصروف');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleRejectExpense = async () => {
+    if (!expenseToReject) return;
+    setRejecting(true);
+    try {
+      const res = await fetch(`/api/v1/expenses/${expenseToReject.id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: rejectReason }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'فشل رفض المصروف');
+      }
+
+      setRejectModalOpen(false);
+      setExpenseToReject(null);
+      setRejectReason('');
+      fetchExpenses();
+    } catch (err: any) {
+      alert(err.message || 'خطأ أثناء رفض المصروف');
+    } finally {
+      setRejecting(false);
+    }
+  };
+
   // Filtered expenses
   const filteredExpenses = expenses.filter((exp) => {
     if (selectedCurrency !== 'ALL' && exp.currency !== selectedCurrency) return false;
@@ -248,13 +330,20 @@ export default function ExpensesPage() {
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
-            <span className="text-xs font-bold text-slate-500 block mb-1">إجمالي العمليات المعتمدة</span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500 block mb-1">العمليات والاعتمادات</span>
+              {(summary?.pendingCount || 0) > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 animate-pulse border border-amber-300">
+                  {summary.pendingCount} معلق للاعتماد
+                </span>
+              )}
+            </div>
             <div className="text-xl sm:text-2xl font-black font-mono text-slate-900">
               {summary?.approvedCount || 0}{' '}
-              <span className="text-xs font-normal text-slate-400">عملية</span>
+              <span className="text-xs font-normal text-slate-400">معتمد</span>
             </div>
             <span className="text-[11px] text-slate-400 block mt-1">
-              {summary?.cancelledCount || 0} عملية ملغاة بقيد عكسي
+              {(summary?.pendingCount || 0)} معلق • {(summary?.cancelledCount || 0)} ملغي ومرفوض
             </span>
           </div>
         </div>
@@ -312,8 +401,10 @@ export default function ExpensesPage() {
                 className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 min-h-[44px]"
               >
                 <option value="ALL">جميع الحالات</option>
+                <option value="pending">معلق للاعتماد (قيد الانتظار)</option>
                 <option value="approved">معتمد ومخصوم</option>
                 <option value="cancelled">ملغي ومسترد</option>
+                <option value="rejected">مرفوض</option>
               </select>
             </div>
           </div>
@@ -336,26 +427,47 @@ export default function ExpensesPage() {
               <div className="sm:hidden divide-y divide-slate-100 -mx-4">
                 {filteredExpenses.map((exp) => {
                   const isApproved = exp.status === 'approved';
+                  const isPending = exp.status === 'pending';
+                  const isRejected = exp.status === 'rejected';
+                  const isCancelled = exp.status === 'cancelled';
+
                   return (
                     <div key={exp.id} className="p-4 space-y-2.5">
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
                           {exp.expenseNumber}
                         </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            isApproved ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {isApproved ? 'معتمد ومخصوم' : 'ملغي ومسترد'}
-                        </span>
+                        {isApproved && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            معتمد ومخصوم
+                          </span>
+                        )}
+                        {isPending && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                            معلق للاعتماد
+                          </span>
+                        )}
+                        {isRejected && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                            مرفوض
+                          </span>
+                        )}
+                        {isCancelled && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 line-through">
+                            ملغي ومسترد
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-baseline justify-between">
                         <span className="font-bold text-sm text-slate-900">{exp.category?.name}</span>
                         <span
                           className={`font-mono font-black text-lg ${
-                            isApproved ? 'text-rose-600' : 'text-slate-400 line-through'
+                            isApproved
+                              ? 'text-rose-600'
+                              : isPending
+                              ? 'text-amber-600'
+                              : 'text-slate-400 line-through'
                           }`}
                         >
                           {exp.amount.toLocaleString()}{' '}
@@ -375,16 +487,42 @@ export default function ExpensesPage() {
                       )}
 
                       <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                        <button
-                          onClick={() => {
-                            setSelectedExpenseForLedger(exp);
-                            setLedgerModalOpen(true);
-                          }}
-                          className="text-[11px] text-blue-600 font-bold hover:underline flex items-center gap-1"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                          <span>عرض القيد المحاسبي</span>
-                        </button>
+                        {isApproved && (
+                          <button
+                            onClick={() => {
+                              setSelectedExpenseForLedger(exp);
+                              setLedgerModalOpen(true);
+                            }}
+                            className="text-[11px] text-blue-600 font-bold hover:underline flex items-center gap-1"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>عرض القيد المحاسبي</span>
+                          </button>
+                        )}
+
+                        {isPending && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleApproveExpense(exp)}
+                              disabled={approvingId === exp.id}
+                              className="px-2.5 py-1 rounded-lg text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 font-bold flex items-center gap-1 text-xs"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>اعتماد</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setExpenseToReject(exp);
+                                setRejectReason('');
+                                setRejectModalOpen(true);
+                              }}
+                              className="px-2.5 py-1 rounded-lg text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300 font-bold flex items-center gap-1 text-xs"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>رفض</span>
+                            </button>
+                          </div>
+                        )}
 
                         {isApproved && (
                           <button
@@ -424,13 +562,21 @@ export default function ExpensesPage() {
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {filteredExpenses.map((exp) => {
                       const isApproved = exp.status === 'approved';
+                      const isPending = exp.status === 'pending';
+                      const isRejected = exp.status === 'rejected';
+                      const isCancelled = exp.status === 'cancelled';
+
                       return (
                         <tr key={exp.id} className="hover:bg-slate-50">
                           <td className="p-3 font-mono font-bold text-slate-900">{exp.expenseNumber}</td>
                           <td className="p-3 font-bold text-slate-900">{exp.category?.name}</td>
                           <td
                             className={`p-3 font-mono font-black text-sm ${
-                              isApproved ? 'text-rose-600' : 'text-slate-400 line-through'
+                              isApproved
+                                ? 'text-rose-600'
+                                : isPending
+                                ? 'text-amber-600'
+                                : 'text-slate-400 line-through'
                             }`}
                           >
                             {exp.amount.toLocaleString()} {exp.currency}
@@ -440,38 +586,78 @@ export default function ExpensesPage() {
                           <td className="p-3 font-mono text-slate-500">{exp.expenseDate}</td>
                           <td className="p-3 text-slate-600">{exp.createdBy}</td>
                           <td className="p-3">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                isApproved ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                              }`}
-                            >
-                              {isApproved ? 'معتمد ومخصوم' : 'ملغي ومسترد'}
-                            </span>
+                            {isApproved && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                معتمد ومخصوم
+                              </span>
+                            )}
+                            {isPending && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                                معلق للاعتماد
+                              </span>
+                            )}
+                            {isRejected && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                                مرفوض
+                              </span>
+                            )}
+                            {isCancelled && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 line-through">
+                                ملغي ومسترد
+                              </span>
+                            )}
                           </td>
                           <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                onClick={() => {
-                                  setSelectedExpenseForLedger(exp);
-                                  setLedgerModalOpen(true);
-                                }}
-                                title="عرض القيد المحاسبي"
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 border border-blue-200 transition-all"
-                              >
-                                <FileText className="w-3.5 h-3.5" />
-                              </button>
+                            <div className="flex items-center justify-center gap-1.5">
+                              {isPending && (
+                                <>
+                                  <button
+                                    onClick={() => handleApproveExpense(exp)}
+                                    disabled={approvingId === exp.id}
+                                    title="اعتماد وصرف المصروف وترحيله"
+                                    className="px-2 py-1 rounded-lg text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 font-bold flex items-center gap-1 transition-all disabled:opacity-50"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    <span>اعتماد</span>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setExpenseToReject(exp);
+                                      setRejectReason('');
+                                      setRejectModalOpen(true);
+                                    }}
+                                    title="رفض المصروف"
+                                    className="px-2 py-1 rounded-lg text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300 font-bold flex items-center gap-1 transition-all"
+                                  >
+                                    <XCircle className="w-3.5 h-3.5" />
+                                    <span>رفض</span>
+                                  </button>
+                                </>
+                              )}
                               {isApproved && (
-                                <button
-                                  onClick={() => {
-                                    setExpenseToCancel(exp);
-                                    setCancelReason('');
-                                    setCancelModalOpen(true);
-                                  }}
-                                  title="إلغاء وعكس المصروف"
-                                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-rose-200 transition-all"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                </button>
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedExpenseForLedger(exp);
+                                      setLedgerModalOpen(true);
+                                    }}
+                                    title="عرض القيد المحاسبي"
+                                    className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 border border-blue-200 transition-all"
+                                  >
+                                    <FileText className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setExpenseToCancel(exp);
+                                      setCancelReason('');
+                                      setCancelModalOpen(true);
+                                    }}
+                                    title="إلغاء وعكس المصروف"
+                                    className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-rose-200 transition-all"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
                               )}
                             </div>
                           </td>
@@ -662,6 +848,71 @@ export default function ExpensesPage() {
                     className="w-full sm:w-auto px-6 py-2.5 bg-rose-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 disabled:opacity-50 min-h-[44px]"
                   >
                     {cancelling ? 'جاري العكس...' : 'تأكيد الإلغاء ورد المبلغ'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: REJECT EXPENSE */}
+        {rejectModalOpen && expenseToReject && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-md p-5 sm:p-6 border border-slate-100 text-right safe-area-pb">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+                <h3 className="font-black text-rose-700 text-base flex items-center gap-2">
+                  <XCircle className="w-5 h-5 text-rose-600" />
+                  <span>رفض المصروف المعلق</span>
+                </h3>
+                <button
+                  onClick={() => setRejectModalOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 text-sm font-bold min-h-[44px] min-w-[44px]"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl mb-4 text-xs text-amber-900 space-y-1.5">
+                <p className="font-bold">معلومات العملية:</p>
+                <p>
+                  المصروف رقم: <strong>{expenseToReject.expenseNumber}</strong> بمبلغ{' '}
+                  <strong>
+                    {expenseToReject.amount.toLocaleString()} {expenseToReject.currency}
+                  </strong>{' '}
+                  ({expenseToReject.category?.name})
+                </p>
+                <p className="text-[11px] text-amber-800">
+                  سيتم رفض المصروف وإلغاؤه دون أي أثر محاسبي أو مالي على الصناديق.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سبب الرفض</label>
+                  <input
+                    type="text"
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="مثال: المستند غير مكتمل، أو تم إلغاء البند"
+                    className="w-full px-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-rose-500 min-h-[44px]"
+                  />
+                </div>
+
+                <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setRejectModalOpen(false)}
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
+                  >
+                    تراجع
+                  </button>
+                  <button
+                    type="button"
+                    disabled={rejecting}
+                    onClick={handleRejectExpense}
+                    className="w-full sm:w-auto px-6 py-2.5 bg-rose-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-rose-700 shadow-md shadow-rose-500/20 disabled:opacity-50 min-h-[44px]"
+                  >
+                    {rejecting ? 'جاري الرفض...' : 'تأكيد الرفض'}
                   </button>
                 </div>
               </div>

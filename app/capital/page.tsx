@@ -83,6 +83,14 @@ export default function CapitalPage() {
       setRefreshing(true);
       const res = await fetch('/api/v1/capital');
       const data = await res.json();
+      if (res.status === 403 || !data.success) {
+        setErrorMsg(data.error || 'غير مصرح لك بالاطلاع على هيكل رأس المال وحقوق الملكية');
+        setTransactions([]);
+        setCurrentCapitalEgp(0);
+        setCapitalByCurrency({});
+        setEquityStructure({});
+        return;
+      }
       if (data.success) {
         setTransactions(data.data || []);
         setCurrentCapitalEgp(data.currentCapital || 0);

@@ -10,6 +10,14 @@ export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  // Strict RBAC: Capital structure, equity, and net profit are restricted to Admin and Accountant
+  if (!['admin', 'accountant'].includes(user.role)) {
+    return NextResponse.json(
+      { error: 'غير مصرح لك بالاطلاع على هيكل رأس المال وحقوق الملكية والأرباح. الصلاحية مقتصرة على الإدارة والمحاسب المالي فقط' },
+      { status: 403 }
+    );
+  }
+
   // 1. Fetch all capital accounts (Equity class 3xxx)
   const capitalAccounts = await prisma.account.findMany({
     where: { accountType: 'capital' },

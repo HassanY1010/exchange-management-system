@@ -68,6 +68,12 @@ export async function POST(
         throw new Error('لا يمكن الاعتماد المالي للإيصال قبل التحقق من وصول الأموال لحساب بنكك أولاً (يجب أن تكون حالة الإيصال Verified)');
       }
 
+      // Segregation of Duties (SoD): The user who verified the receipt cannot be the same user who approves it financially
+      // (Unless user is admin performing emergency dual-verification with explicit audit trail)
+      if (locked[0].verifiedBy && locked[0].verifiedBy === user.name && user.role !== 'admin') {
+        throw new Error(`مخالفة لقواعد فصل الصلاحيات والمهام (Segregation of Duties): المستخدم الذي قام بالتحقق (${locked[0].verifiedBy}) لا يمكنه اعتماد الإيصال المالي وترحيله للدفاتر بنفسه. يجب الاعتماد بواسطة مستخدم مخول آخر.`);
+      }
+
       const updateData: any = {
         status: 'approved',
         approvedBy: user.name,

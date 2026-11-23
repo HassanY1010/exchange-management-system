@@ -95,7 +95,8 @@ export async function GET(req: NextRequest) {
     summary: {
       totalCount: rawExpenses.length,
       approvedCount: allApproved.length,
-      cancelledCount: rawExpenses.filter((e) => e.status === 'cancelled').length,
+      pendingCount: rawExpenses.filter((e) => e.status === 'pending').length,
+      cancelledCount: rawExpenses.filter((e) => e.status === 'cancelled' || e.status === 'rejected').length,
       expensesByCurrency,
     },
   });
@@ -183,148 +184,59 @@ export async function POST(req: NextRequest) {
     await assertBusinessDateOpen(dateStr);
     const desc = description?.trim() || `مصروف تشغيلي: ${category.name}`;
 
-    // 4. Execute atomic transaction with Row-Level Locks and Double-Entry Ledger Posting
-    const result = await prisma.$transaction(async (tx) => {
-      // 0. Verify that the business date is open and not frozen
-      await assertBusinessDateOpen(dateStr, tx);
+    // 4. Record Expense in 'pending' status without financial/ledger impact
+    // Segregation of Duties (SoD): Expenses must be approved by an authorized user before posting to Ledger
+    const expenseCount = await prisma.expense.count();
+    const expenseNumber = `EXP-${Date.now()}-${expenseCount + 1}`;
 
-      // Find or auto-initialize currency-matched Expense Account (Class 5xxx)
-      const expenseCode = cur === 'EGP' ? '5010' : `5010-${cur}`;
-      let expenseAcc = await tx.account.findFirst({
-        where: { currency: cur, accountType: 'expense', accountCode: expenseCode },
-      });
-
-      if (!expenseAcc) {
-        expenseAcc = await tx.account.upsert({
-          where: { accountCode: expenseCode },
-          create: {
-            accountCode: expenseCode,
-            name: `المصروفات التشغيلية والعمومية (${cur})`,
-            accountType: 'expense',
-            currency: cur,
-            openingBalance: 0,
-            currentBalance: 0,
-            isSystem: true,
-            status: 'active',
-          },
-          update: {},
-        });
-      }
-
-      // Lock both accounts in deterministic sorted order to prevent deadlocks and race conditions
-      const sortedIds = [safeAccount.id, expenseAcc.id].sort();
-      const lockedFirst = (await tx.$queryRawUnsafe(
-        'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance", "status" FROM "Account" WHERE id = $1 FOR UPDATE',
-        sortedIds[0]
-      )) as any[];
-      const lockedSecond = (await tx.$queryRawUnsafe(
-        'SELECT id, "accountCode", "name", "accountType", "currency", "currentBalance", "status" FROM "Account" WHERE id = $1 FOR UPDATE',
-        sortedIds[1]
-      )) as any[];
-
-      const accountLockMap = new Map<string, any>();
-      accountLockMap.set(sortedIds[0], lockedFirst[0]);
-      accountLockMap.set(sortedIds[1], lockedSecond[0]);
-
-      const lockedSafe = accountLockMap.get(safeAccount.id);
-      const lockedExp = accountLockMap.get(expenseAcc.id);
-
-      const dSafeBal = new Decimal(lockedSafe.currentBalance.toString());
-
-      // Overdraft Protection: Verify safe balance sufficiency
-      if (dSafeBal.lessThan(dAmount)) {
-        throw new Error(
-          `رصيد الحساب المالي (${lockedSafe.name}) لا يكفي لسداد المصروف. الرصيد المتاح: ${dSafeBal.toFixed(2)} ${cur}، والمطلوب: ${dAmount.toFixed(2)} ${cur}`
-        );
-      }
-
-      // Generate unique serial expense number
-      const expenseCount = await tx.expense.count();
-      const expenseNumber = `EXP-${Date.now()}-${expenseCount + 1}`;
-
-      // Post Balanced Double-Entry:
-      // Debit: Operating Expense 5xxx (increases expense)
-      // Credit: Safe / Bank Account (decreases cash asset)
-      const ledgerEntry = await postLedgerTransaction({
-        entryType: 'operating_expense',
-        referenceType: 'Expense',
-        referenceId: expenseNumber,
-        entryDate: dateStr,
-        description: `صرف مصروف ${category.name}: ${desc}`,
+    const newExpense = await prisma.expense.create({
+      data: {
+        expenseNumber,
+        categoryId: category.id,
+        accountId: safeAccount.id,
+        amount: dAmount.toNumber(),
+        currency: cur,
+        expenseDate: dateStr,
+        description: desc,
+        receiptStorageKey: receiptStorageKey || null,
+        status: 'pending',
         createdBy: user.name || user.email || user.userId || 'system',
-        tx,
-        lines: [
-          {
-            accountId: lockedExp.id,
-            currency: cur,
-            debit: dAmount.toNumber(),
-            credit: 0,
-            description: `مصروف تشغيلي - ${category.name}`,
-          },
-          {
-            accountId: lockedSafe.id,
-            currency: cur,
-            debit: 0,
-            credit: dAmount.toNumber(),
-            description: `صرف نقدي من ${lockedSafe.name}`,
-          },
-        ],
-      });
+        approvedBy: null,
+      },
+      include: { category: true },
+    });
 
-      // Create Expense record
-      const newExpense = await tx.expense.create({
-        data: {
-          expenseNumber,
-          categoryId: category.id,
-          accountId: lockedSafe.id,
-          amount: dAmount.toNumber(),
-          currency: cur,
-          expenseDate: dateStr,
-          description: desc,
-          receiptStorageKey: receiptStorageKey || null,
-          status: 'approved',
-          createdBy: user.name || user.email || user.userId || 'system',
-          approvedBy: user.name || user.email || user.userId || 'system',
-        },
-        include: { category: true },
-      });
-
-      // Record Audit Log inside the same atomic transaction
-      await logAuditEvent({
-        userId: user.userId,
-        action: 'RECORD_EXPENSE',
-        entityType: 'Expense',
-        entityId: newExpense.id,
-        newValues: {
-          expenseNumber: newExpense.expenseNumber,
-          category: category.name,
-          amount: dAmount.toNumber(),
-          currency: cur,
-          paidFromAccount: lockedSafe.name,
-          expenseAccount: lockedExp.accountCode,
-          expenseDate: dateStr,
-        },
-        reason: `تسجيل مصروف ${category.name} بمبلغ ${dAmount.toNumber().toLocaleString()} ${cur}`,
-        tx,
-      });
-
-      return { newExpense, ledgerEntry, lockedSafe, lockedExp, cur };
+    // Record Audit Log for the creation event
+    await logAuditEvent({
+      userId: user.userId,
+      action: 'CREATE_EXPENSE_PENDING',
+      entityType: 'Expense',
+      entityId: newExpense.id,
+      newValues: {
+        expenseNumber: newExpense.expenseNumber,
+        category: category.name,
+        amount: dAmount.toNumber(),
+        currency: cur,
+        paidFromAccount: safeAccount.name,
+        expenseDate: dateStr,
+        status: 'pending',
+      },
+      reason: `تسجيل مصروف ${category.name} بمبلغ ${dAmount.toNumber().toLocaleString()} ${cur} - معلق للاعتماد (Pending Approval)`,
     });
 
     return NextResponse.json(
       {
         success: true,
-        message: `تم صرف واعتماد المصروف بمبلغ ${dAmount.toNumber().toLocaleString()} ${result.cur} وترحيل القيد بنجاح`,
+        message: `تم تسجيل المصروف بنجاح وهو معلق للاعتماد (Pending Approval) بمبلغ ${dAmount.toNumber().toLocaleString()} ${cur}، بانتظار الاعتماد المستقل للترحيل للدفتر العام`,
         data: {
-          ...result.newExpense,
+          ...newExpense,
           amount: dAmount.toNumber(),
           account: {
-            id: result.lockedSafe.id,
-            name: result.lockedSafe.name,
-            accountCode: result.lockedSafe.accountCode,
-            currency: result.cur,
+            id: safeAccount.id,
+            name: safeAccount.name,
+            accountCode: safeAccount.accountCode,
+            currency: cur,
           },
-          ledgerEntry: result.ledgerEntry,
         },
       },
       { status: 201 }

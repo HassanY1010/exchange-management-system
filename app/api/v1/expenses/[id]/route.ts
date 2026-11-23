@@ -82,8 +82,38 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       return NextResponse.json({ error: 'المصروف المطلوب إلغاؤه غير موجود' }, { status: 404 });
     }
 
-    if (expense.status === 'cancelled') {
-      return NextResponse.json({ error: 'هذا المصروف ملغي مسبقاً ولا يمكن إلغاؤه مرة أخرى' }, { status: 400 });
+    if (expense.status === 'cancelled' || expense.status === 'rejected') {
+      return NextResponse.json({ error: 'هذا المصروف ملغي أو مرفوض مسبقاً' }, { status: 400 });
+    }
+
+    // If expense is pending (not yet approved), cancel it directly with zero ledger reversal
+    if (expense.status === 'pending') {
+      const updatedExpense = await prisma.expense.update({
+        where: { id: expense.id },
+        data: {
+          status: 'cancelled',
+          description: `${expense.description} [ملغي: ${reason || 'بواسطة ' + (user.name || user.email)}]`,
+        },
+      });
+
+      await logAuditEvent({
+        userId: user.userId,
+        action: 'CANCEL_EXPENSE',
+        entityType: 'Expense',
+        entityId: expense.id,
+        oldValues: { status: 'pending' },
+        newValues: { status: 'cancelled' },
+        reason: reason || `إلغاء مصروف معلق: ${expense.expenseNumber}`,
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `تم إلغاء المصروف المعلق ${expense.expenseNumber} بنجاح دون أي تأثير مالي`,
+        data: {
+          ...updatedExpense,
+          amount: Number(updatedExpense.amount),
+        },
+      });
     }
 
     const dAmount = new Decimal(expense.amount.toString());

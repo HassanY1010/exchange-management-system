@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
-  if (!['admin', 'accountant', 'cashier'].includes(user.role)) {
+  if (!['admin', 'accountant', 'custody_officer', 'cashier'].includes(user.role)) {
     return NextResponse.json(
       { error: 'غير مصرح لك بتنفيذ التحويلات المالية بين الصناديق' },
       { status: 403 }

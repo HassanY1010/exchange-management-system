@@ -49,6 +49,32 @@ interface SidebarProps {
 
 export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const [userRole, setUserRole] = React.useState<string>('admin');
+
+  React.useEffect(() => {
+    fetch('/api/v1/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.user?.role) {
+          setUserRole(data.user.role);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const visibleMenuItems = React.useMemo(() => {
+    if (userRole === 'custody_officer') {
+      // Custody Officer: restricted strictly to operational cash & custody pages
+      const allowed = ['/dashboard', '/customers', '/customer-sessions', '/receipts', '/custody', '/accounts'];
+      return menuItems.filter((item) => allowed.includes(item.href));
+    }
+    if (userRole === 'accountant') {
+      // Accountant: sees all financial & operational pages except system audit logs
+      return menuItems.filter((item) => item.href !== '/audit-logs');
+    }
+    // Admin: sees all pages
+    return menuItems;
+  }, [userRole]);
 
   const handleLinkClick = () => {
     if (onClose) onClose();
@@ -87,7 +113,7 @@ export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
 
       {/* Navigation List */}
       <nav className="flex-1 min-h-0 p-3 space-y-1 overflow-y-auto overscroll-contain touch-scroll custom-scrollbar">
-        {menuItems.map((item) => {
+        {visibleMenuItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
           const Icon = item.icon;
 
