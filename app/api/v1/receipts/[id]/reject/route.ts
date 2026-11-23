@@ -37,6 +37,10 @@ export async function POST(
         throw new Error('لا يمكن رفض إيصال تم اعتماده مالياً بالفعل. لإلغاء أثره يجب عمل قيد تسوية عكسي');
       }
 
+      if (locked[0].status === 'rejected') {
+        throw new Error('تم رفض هذا الإيصال مسبقاً ولا يمكن رفضه مجدداً');
+      }
+
       const updated = await tx.bankakReceipt.update({
         where: { id: params.id },
         data: {
@@ -61,7 +65,7 @@ export async function POST(
       });
 
       return { receipt: updated, oldStatus: locked[0].status };
-    });
+    }, { maxWait: 15000, timeout: 30000 });
 
     await createNotification({
       type: 'receipt_rejected',

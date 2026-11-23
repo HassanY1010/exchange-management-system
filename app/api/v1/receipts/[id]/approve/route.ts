@@ -99,6 +99,13 @@ export async function POST(
       }
 
       const receiptAmount = Number(updatedReceipt.amount);
+      if (!receiptAmount || isNaN(receiptAmount) || receiptAmount <= 0) {
+        throw new Error('لا يمكن اعتماد إيصال بمبلغ صفري أو سالب');
+      }
+
+      if (updatedReceipt.currency !== 'SDG') {
+        throw new Error(`عملة الإيصال غير مدعومة للاعتماد المالي: ${updatedReceipt.currency}`);
+      }
 
       // Post Double-Entry Ledger Transaction INSIDE the same atomic transaction
       await postLedgerTransaction({
@@ -175,7 +182,7 @@ export async function POST(
         balanceCheck: balanceCheckResult,
         linkedSession: currentSession,
       };
-    });
+    }, { maxWait: 15000, timeout: 30000 });
 
     const receiptAmount = Number(receipt.amount);
 
@@ -224,6 +231,7 @@ export async function POST(
     });
   } catch (error: any) {
     console.error('Error approving receipt:', error);
-    return NextResponse.json({ error: error.message || 'خطأ في اعتماد الإيصال' }, { status: 500 });
+    const status = error.message?.includes('غير موجود') ? 404 : 400;
+    return NextResponse.json({ error: error.message || 'خطأ في اعتماد الإيصال' }, { status });
   }
 }

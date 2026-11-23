@@ -30,11 +30,15 @@ export async function assertBusinessDateOpen(businessDate: string, tx?: any) {
   const client = tx || prisma;
 
   if (tx && typeof tx.$executeRawUnsafe === 'function') {
-    // Acquire a transaction-level advisory lock on this businessDate
-    await tx.$executeRawUnsafe(
-      `SELECT pg_advisory_xact_lock(hashtext('daily-closing:' || $1))`,
-      businessDate
-    );
+    // Acquire a transaction-level advisory lock on this businessDate (fail-safe for pooled connections)
+    try {
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtext('daily-closing:' || $1))`,
+        businessDate
+      );
+    } catch {
+      // Advisory locks may not be supported in some connection pooler modes; fall back safely to DB record check
+    }
   }
 
   const closing = await client.dailyClosing.findUnique({

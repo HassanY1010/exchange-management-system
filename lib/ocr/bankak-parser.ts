@@ -20,11 +20,16 @@ export interface ParsedBankakReceipt {
  * Normalizes Eastern Arabic numerals to Western digits (0-9)
  */
 export function normalizeDigits(text: string): string {
+  if (!text) return '';
   const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
   let result = text;
   for (let i = 0; i < 10; i++) {
     result = result.replace(new RegExp(arabicDigits[i], 'g'), i.toString());
   }
+  // Normalize Arabic decimal separator (٫ U+066B) to standard dot (.)
+  result = result.replace(/\u066B/g, '.');
+  // Normalize Arabic thousands separators (٬ U+066C, ، U+060C) between digits to standard comma (,)
+  result = result.replace(/(\d)[\u066C\u060C](\d)/g, '$1,$2');
   return result;
 }
 
@@ -54,7 +59,7 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 1. Transaction ID
   let transactionId = '';
   const txnPatterns = [
-    /(?:Transaction\s*(?:ID|No|Ref|Reference)|Ref(?:erence)?|TXN|رقم\s*(?:العملية|المرجع|الإشعار)|الرقم\s*المرجعي)[\s:]*([A-Za-z0-9\-_]+)/i,
+    /(?:Transaction\s*(?:ID|No|Ref|Reference)|Ref(?:erence)?|TXN|رقم\s*(?:العملية|المرجع|الإشعار|المعاملة)|الرقم\s*المرجعي|معرف\s*العملية)[\s:]*([A-Za-z0-9\-_]+)/i,
     /(FT[0-9]{8,20})/i,
     /([0-9]{9,16})/,
   ];
@@ -70,14 +75,15 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 2. Amount
   let amount = 0;
   const amountPatterns = [
-    /(?:Amount|المبلغ|القيمة|مبلغ\s*التحويل)[\s:]*([0-9]{1,3}(?:[,][0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/i,
-    /([0-9]{1,3}(?:[,][0-9]{3})+(?:\.[0-9]+)?)\s*(?:SDG|ج\.س|جنيه|SD|جنيه\s*سوداني)/i,
-    /([0-9]{4,12}(?:\.[0-9]+)?)\s*(?:SDG|ج\.س)/i,
+    /(?:Amount|المبلغ|القيمة|مبلغ\s*التحويل)[\s:]*([0-9]{1,3}(?:\s*[,]\s*[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/i,
+    /([0-9]{1,3}(?:\s*[,]\s*[0-9]{3})+(?:\.[0-9]+)?)\s*(?:SDG|ج\.س|جنيه|SD|جنيه\s*سوداني)/i,
+    /([0-9]{4,12}(?:\.[0-9]+)?)\s*(?:SDG|ج\.س|جنيه)/i,
+    /(?:SDG|ج\.س|جنيه)[\s:]*([0-9]{1,3}(?:\s*[,]\s*[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/i,
   ];
   for (const pattern of amountPatterns) {
     const match = normalized.match(pattern);
     if (match) {
-      const cleanNum = match[1].replace(/,/g, '');
+      const cleanNum = match[1].replace(/[\s,]/g, '');
       const parsedVal = parseFloat(cleanNum);
       if (!isNaN(parsedVal) && parsedVal > 0) {
         amount = parsedVal;
@@ -105,7 +111,7 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 4. Sender Account
   let senderAccount = '';
   const senderAccPatterns = [
-    /(?:\bSender\s*Account\b|\bFrom\s*Account\b|رقم\s*حساب\s*المرسل|حساب\s*الخصم|من\s*الحساب|من\s*حساب)[\s:]*([0-9\*\-]{6,20})/i,
+    /(?:\bSender\s*Account\b|\bFrom\s*Account\b|(?:رقم\s*)?حساب\s*المرسل|حساب\s*الخصم|من\s*الحساب|من\s*حساب|(?:رقم\s*)?(?:هاتف|موبايل|جوال)\s*المرسل)[\s:]*([0-9\*\-]{6,20})/i,
   ];
   for (const pattern of senderAccPatterns) {
     const match = normalized.match(pattern);
@@ -134,7 +140,7 @@ export function parseBankakReceiptText(rawInput: string): ParsedBankakReceipt {
   // 6. Receiver Account
   let receiverAccount = '';
   const receiverAccPatterns = [
-    /(?:\bBeneficiary\s*Account\b|\bTo\s*Account\b|رقم\s*حساب\s*المستفيد|حساب\s*الإيداع|إلى\s*الحساب|إلى\s*حساب)[\s:]*([0-9\*\-]{6,20})/i,
+    /(?:\bBeneficiary\s*Account\b|\bTo\s*Account\b|(?:رقم\s*)?حساب\s*المستفيد|حساب\s*الإيداع|إلى\s*الحساب|إلى\s*حساب|(?:رقم\s*)?(?:هاتف|موبايل|جوال)\s*المستفيد)[\s:]*([0-9\*\-]{6,20})/i,
   ];
   for (const pattern of receiverAccPatterns) {
     const match = normalized.match(pattern);

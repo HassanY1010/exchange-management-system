@@ -41,6 +41,9 @@ export async function POST(
       if (currentStatus === 'approved') {
         throw new Error('الإيصال تم اعتماده مالياً مسبقاً ولا يتطلب إعادة تحقق');
       }
+      if (currentStatus === 'verified') {
+        throw new Error('تم التحقق البنكي من هذا الإيصال مسبقاً وهو بانتظار الاعتماد المالي');
+      }
       if (currentStatus === 'duplicate') {
         throw new Error('لا يمكن التحقق من إيصال مصنف كمكرر في النظام');
       }
@@ -82,7 +85,7 @@ export async function POST(
       });
 
       return updated;
-    });
+    }, { maxWait: 15000, timeout: 30000 });
 
     // Send targeted notification to accountant for financial approval
     await createNotification({

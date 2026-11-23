@@ -165,8 +165,12 @@ export async function POST(req: NextRequest) {
       // Concurrency-safe DB insert with advisory lock & unique constraint protection
       const receipt = await prisma.$transaction(async (tx) => {
         if (transactionId) {
-          // Acquire transaction-scoped advisory lock on transactionId
-          await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', transactionId);
+          // Acquire transaction-scoped advisory lock on transactionId (fail-safe for pooled connections)
+          try {
+            await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', transactionId);
+          } catch {
+            // Advisory locks may not be supported in some connection pooler modes; fall back safely to DB constraints
+          }
 
           // Check if concurrent request already inserted this transactionId as active
           const concurrentMatch = await tx.bankakReceipt.findFirst({
@@ -264,7 +268,7 @@ export async function POST(req: NextRequest) {
           }
           throw dbErr;
         }
-      });
+      }, { maxWait: 15000, timeout: 30000 });
 
       // Append newly created receipt to in-memory existing list for in-flight duplicate checks
       existingReceipts.push({

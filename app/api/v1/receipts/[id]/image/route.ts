@@ -20,7 +20,7 @@ export async function GET(
   }
 
   // RBAC Enforcement: Only authorized staff roles may view financial receipts
-  const allowedRoles = ['admin', 'accountant', 'data_entry', 'viewer'];
+  const allowedRoles = ['admin', 'accountant', 'data_entry', 'bankak_auditor', 'custody_officer', 'viewer'];
   if (!allowedRoles.includes(user.role)) {
     return NextResponse.json(
       { error: 'غير مصرح لرتبتك بعرض صور إيصالات بنكك', success: false },

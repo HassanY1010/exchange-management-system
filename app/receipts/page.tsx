@@ -1246,6 +1246,20 @@ export default function ReceiptsPage() {
                 </div>
               )}
 
+              {/* Rejected Alert if rejected */}
+              {reviewReceipt.status === 'rejected' && (
+                <div className="mb-4 p-3.5 bg-slate-100 border border-slate-300 rounded-2xl flex items-center space-x-3 space-x-reverse text-slate-800">
+                  <XCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                  <div>
+                    <h4 className="font-black text-xs sm:text-sm text-rose-700">هذا الإيصال مرفوض رسمياً</h4>
+                    <p className="text-[11px] sm:text-xs text-slate-600 mt-0.5">
+                      <span className="font-bold">سبب الرفض: </span>
+                      {reviewReceipt.suspicionReason || 'تم رفض الإيصال من قبل المراجع المختص'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Stack on mobile, 2-cols on desktop */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                 {/* 1. VISUAL IMAGE PREVIEW & OCR METRICS */}
@@ -1509,13 +1523,13 @@ export default function ReceiptsPage() {
                   <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
                     <button
                       onClick={handleReject}
-                      disabled={processingAction || reviewReceipt.status === 'approved'}
+                      disabled={processingAction || reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
                       className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 rounded-xl text-xs font-bold transition-all disabled:opacity-40 min-h-[44px]"
                     >
                       رفض الإيصال
                     </button>
                     <div className="flex items-center space-x-2 space-x-reverse flex-wrap gap-2">
-                      {!reviewReceipt.verifiedBy && reviewReceipt.status !== 'approved' && reviewReceipt.status !== 'duplicate' && (
+                      {!reviewReceipt.verifiedBy && reviewReceipt.status !== 'approved' && reviewReceipt.status !== 'duplicate' && reviewReceipt.status !== 'rejected' && (
                         <button
                           type="button"
                           onClick={handleVerify}
@@ -1533,7 +1547,7 @@ export default function ReceiptsPage() {
                       </button>
                       <button
                         onClick={handleApprove}
-                        disabled={processingAction || reviewReceipt.status === 'approved' || reviewReceipt.status === 'duplicate'}
+                        disabled={processingAction || reviewReceipt.status === 'approved' || reviewReceipt.status === 'duplicate' || reviewReceipt.status === 'rejected'}
                         className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse disabled:opacity-40 min-h-[44px]"
                       >
                         <Check className="w-4 h-4 shrink-0" />
