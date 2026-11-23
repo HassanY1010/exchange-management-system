@@ -40,6 +40,9 @@ export async function POST(
       if (locked[0].status === 'rejected') {
         throw new Error('لا يمكن اعتماد إيصال تم رفضه مسبقاً');
       }
+      if (!locked[0].amount || Number(locked[0].amount) <= 0) {
+        throw new Error('لا يمكن الاعتماد المالي لإيصال بمبلغ صفري أو غير محدد. يرجى مراجعة وتعديل المبلغ الفعلي أولاً.');
+      }
 
       // Prohibit approving receipt for a cancelled customer session
       let currentSession: any = null;

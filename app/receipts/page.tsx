@@ -29,6 +29,7 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
+  Copy,
 } from 'lucide-react';
 
 interface PendingImageFile {
@@ -69,6 +70,24 @@ export default function ReceiptsPage() {
     needsReview: number;
     message?: string;
   } | null>(null);
+  const [postUploadBanner, setPostUploadBanner] = useState<{
+    total: number;
+    success: number;
+    duplicates: number;
+    suspicious: number;
+    needsReview: number;
+    message: string;
+  } | null>(null);
+  const [copiedTxnId, setCopiedTxnId] = useState<string | null>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyTxn = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!id) return;
+    navigator.clipboard.writeText(id);
+    setCopiedTxnId(id);
+    setTimeout(() => setCopiedTxnId(null), 2000);
+  };
 
   // Hidden file inputs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -364,6 +383,18 @@ export default function ReceiptsPage() {
         }
 
         const successCount = allReturned.length;
+        const readyCount = Math.max(0, successCount - dupCount - reviewCount);
+        const summaryMsg = `تمت معالجة ${total} إيصالات: ${reviewCount > 0 ? `${reviewCount} تحتاج مراجعة` : '0 تحتاج مراجعة'}${dupCount > 0 ? `، ${dupCount} مكررة` : ''}، و${readyCount} جاهزة للتحقق`;
+
+        setPostUploadBanner({
+          total,
+          success: successCount,
+          duplicates: dupCount,
+          suspicious: suspCount,
+          needsReview: reviewCount,
+          message: summaryMsg,
+        });
+
         if (successCount > 0) {
           fetchReceipts();
         }
@@ -382,14 +413,13 @@ export default function ReceiptsPage() {
               : `تعذرت المعالجة الآلية للصور: ${failedErrors.join(' | ')}`,
         });
 
-        // If all succeeded with 0 issues, close modal smoothly after 2 seconds
-        if (successCount === total && dupCount === 0 && suspCount === 0 && reviewCount === 0) {
-          setTimeout(() => {
-            setUploadModalOpen(false);
-            setUploadSummary(null);
-            clearAllFiles();
-          }, 2000);
-        }
+        // Always auto-transition to table after brief delay (1.2s) to show completion status
+        setTimeout(() => {
+          setUploadModalOpen(false);
+          setUploadSummary(null);
+          clearAllFiles();
+          tableRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 1200);
       } else {
         // Text mode: parse blocks and submit
         if (!batchReceiptsText.trim()) {
@@ -435,15 +465,24 @@ export default function ReceiptsPage() {
             message: `تمت معالجة وتدقيق ${returned.length} إشعار بنجاح!`,
           });
 
+          const readyCount = Math.max(0, returned.length - dupCount - reviewCount);
+          setPostUploadBanner({
+            total: returned.length,
+            success: returned.length - dupCount,
+            duplicates: dupCount,
+            suspicious: suspCount,
+            needsReview: reviewCount,
+            message: `تمت معالجة ${returned.length} إشعار: ${reviewCount} تحتاج مراجعة، ${dupCount} مكررة، و${readyCount} جاهزة للتحقق`,
+          });
+
           setBatchReceiptsText('');
           fetchReceipts();
 
-          if (dupCount === 0 && suspCount === 0) {
-            setTimeout(() => {
-              setUploadModalOpen(false);
-              setUploadSummary(null);
-            }, 2000);
-          }
+          setTimeout(() => {
+            setUploadModalOpen(false);
+            setUploadSummary(null);
+            tableRef.current?.scrollIntoView({ behavior: 'smooth' });
+          }, 1200);
         } catch (textErr: any) {
           clearTimeout(timeoutId);
           throw textErr;
@@ -603,6 +642,15 @@ export default function ReceiptsPage() {
   // Approve Receipt & Post Ledger (Step 2)
   const handleApprove = async () => {
     if (!reviewReceipt) return;
+
+    if (!editAmount || Number(editAmount) <= 0) {
+      setModalFeedback({
+        type: 'error',
+        message: 'لا يمكن اعتماد إيصال بمبلغ 0 SDG أو غير محدد. يرجى إدخال المبلغ الصحيح أولاً.',
+      });
+      return;
+    }
+
     setProcessingAction(true);
     setModalFeedback(null);
     try {
@@ -790,6 +838,32 @@ export default function ReceiptsPage() {
           </div>
         </div>
 
+        {/* Post-Upload Notification Banner */}
+        {postUploadBanner && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-blue-950 p-4 rounded-2xl flex items-center justify-between shadow-sm animate-in fade-in">
+            <div className="flex items-center space-x-3 space-x-reverse min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <CheckCircle className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="font-black text-xs sm:text-sm text-blue-900">
+                  تم اكتمال الرفع والمعالجة — تم تحديث جدول الإيصالات تلقائياً
+                </h4>
+                <p className="text-[11px] sm:text-xs text-blue-700 mt-0.5 font-medium">
+                  {postUploadBanner.message}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setPostUploadBanner(null)}
+              className="p-1.5 text-blue-400 hover:text-blue-700 rounded-lg min-w-[32px] min-h-[32px] flex items-center justify-center shrink-0"
+              title="إغلاق التنبيه"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Filters & Search Toolbar */}
         <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center space-x-2 space-x-reverse w-full md:max-w-md">
@@ -837,8 +911,8 @@ export default function ReceiptsPage() {
           </div>
         </div>
 
-        {/* 1. MOBILE CARDS VIEW: (Visible on screens < 1024px) */}
-        <div className="lg:hidden space-y-3">
+        {/* 1. MOBILE CARDS VIEW: Prioritizing 1. Recipient, 2. Amount, 3. TXN (Visible on screens < 1024px) */}
+        <div ref={tableRef} className="lg:hidden space-y-3">
           {receipts.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400 text-xs sm:text-sm">
               {loading ? 'جاري تحميل الإيصالات...' : 'لا توجد إيصالات تطابق البحث'}
@@ -848,39 +922,84 @@ export default function ReceiptsPage() {
               <div
                 key={rcp.id}
                 onClick={() => openReview(rcp)}
-                className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm active:bg-slate-50 transition-colors flex flex-col justify-between"
+                className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm active:bg-slate-50 transition-colors flex flex-col justify-between space-y-3"
               >
-                <div className="flex items-center justify-between mb-2">
+                {/* Header row: Receipt ID & Status */}
+                <div className="flex items-center justify-between">
                   <span className="font-mono text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg text-slate-800">
                     {rcp.receiptNumber}
                   </span>
                   <div>{getStatusBadge(rcp.status)}</div>
                 </div>
 
-                <div className="flex items-baseline justify-between mb-2">
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">رقم العملية (Bankak TXN):</span>
-                    <span className="font-mono font-bold text-sm text-blue-700">{rcp.transactionId}</span>
+                {/* Priority 1 & 2: Recipient Name & Amount */}
+                <div className="p-3 bg-slate-50/80 rounded-xl space-y-2 border border-slate-100">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-slate-400 block font-medium">اسم المستفيد (المرسل إليه):</span>
+                      {rcp.receiverName ? (
+                        <span className="font-bold text-sm text-slate-900 truncate block">{rcp.receiverName}</span>
+                      ) : (
+                        <span className="inline-flex items-center text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[11px] font-bold border border-amber-200">
+                          غير مستخرج (يحتاج مراجعة)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-left shrink-0">
+                      <span className="text-[10px] text-slate-400 block font-medium">المبلغ:</span>
+                      {Number(rcp.amount) > 0 ? (
+                        <span className="font-mono font-black text-base text-slate-900">
+                          {Number(rcp.amount).toLocaleString()} <span className="text-xs text-slate-400 font-normal">SDG</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center space-x-1 space-x-reverse text-amber-800 bg-amber-100 px-2 py-0.5 rounded text-[11px] font-bold border border-amber-300 animate-pulse">
+                          <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                          <span>غير محدد</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-left">
-                    <span className="text-[10px] text-slate-400 block">المبلغ:</span>
-                    <span className="font-mono font-black text-base text-slate-900">
-                      {Number(rcp.amount).toLocaleString()} <span className="text-xs text-slate-400 font-normal">SDG</span>
-                    </span>
+
+                  {/* Priority 3: Transaction ID with copy button */}
+                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">رقم العملية (Bankak TXN):</span>
+                      <span className="font-mono font-bold text-xs sm:text-sm text-blue-700">{rcp.transactionId || 'غير مستخرج'}</span>
+                    </div>
+                    {rcp.transactionId && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleCopyTxn(rcp.transactionId, e)}
+                        className="px-2 py-1 bg-white border border-slate-200 text-slate-600 rounded-lg text-[10px] font-bold flex items-center space-x-1 space-x-reverse hover:bg-slate-50"
+                      >
+                        {copiedTxnId === rcp.transactionId ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            <span className="text-emerald-600">تم النسخ</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3 text-slate-400" />
+                            <span>نسخ</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded-xl mb-3 text-xs">
+                {/* Metadata Grid */}
+                <div className="grid grid-cols-2 gap-2 text-xs px-1">
                   <div>
-                    <span className="text-[10px] text-slate-400 block">المرسل:</span>
+                    <span className="text-[10px] text-slate-400 block">اسم المرسل:</span>
                     <span className="font-medium text-slate-800 truncate block">{rcp.senderName || '—'}</span>
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-400 block">العميل المرتبط:</span>
-                    <span className="font-medium text-blue-700 truncate block">{rcp.customer?.name || 'عام'}</span>
+                    <span className="font-medium text-blue-700 truncate block">{rcp.customer?.name || 'غير محدد'}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-400 block">التاريخ:</span>
+                    <span className="text-[10px] text-slate-400 block">التاريخ والوقت:</span>
                     <span className="font-mono text-slate-600 text-[11px]">{rcp.transactionDate} {rcp.transactionTime}</span>
                   </div>
                   <div>
@@ -898,24 +1017,23 @@ export default function ReceiptsPage() {
                   className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs flex items-center justify-center space-x-1 space-x-reverse min-h-[40px]"
                 >
                   <Eye className="w-4 h-4" />
-                  <span>معاينة وتدقيق الإيصال والصورة</span>
+                  <span>معاينة واعتماد الإيصال والصورة</span>
                 </button>
               </div>
             ))
           )}
         </div>
 
-        {/* 2. DESKTOP VIEW: Data Table (Visible on screens >= 1024px) */}
+        {/* 2. DESKTOP VIEW: Data Table by Priority (Visible on screens >= 1024px) */}
         <div className="hidden lg:block bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                 <tr>
-                  <th className="p-3.5">رقم الإيصال</th>
-                  <th className="p-3.5">رقم العملية (Bankak TXN)</th>
+                  <th className="p-3.5">المستفيد (المرسل إليه)</th>
                   <th className="p-3.5">المبلغ (SDG)</th>
-                  <th className="p-3.5">المرسل</th>
-                  <th className="p-3.5">المستفيد</th>
+                  <th className="p-3.5">رقم العملية (Bankak TXN)</th>
+                  <th className="p-3.5">اسم المرسل</th>
                   <th className="p-3.5">العميل المرتبط</th>
                   <th className="p-3.5">التاريخ والوقت</th>
                   <th className="p-3.5">دقة OCR</th>
@@ -926,24 +1044,84 @@ export default function ReceiptsPage() {
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {receipts.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-12 text-slate-400">
+                    <td colSpan={9} className="text-center py-12 text-slate-400">
                       {loading ? 'جاري تحميل الإيصالات...' : 'لا توجد إيصالات تطابق البحث'}
                     </td>
                   </tr>
                 ) : (
                   receipts.map((rcp) => (
                     <tr key={rcp.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="p-3.5 font-mono font-medium text-slate-900">{rcp.receiptNumber}</td>
-                      <td className="p-3.5 font-mono font-bold text-blue-700">{rcp.transactionId}</td>
-                      <td className="p-3.5 font-mono font-black text-slate-900 text-sm">
-                        {Number(rcp.amount).toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">SDG</span>
+                      {/* 1. المستفيد (المرسل إليه) */}
+                      <td className="p-3.5">
+                        {rcp.receiverName ? (
+                          <span className="font-bold text-slate-900 block">{rcp.receiverName}</span>
+                        ) : (
+                          <span className="inline-flex items-center text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[11px] font-medium border border-amber-200">
+                            غير مستخرج (يحتاج مراجعة)
+                          </span>
+                        )}
+                        {rcp.receiverAccount && (
+                          <span className="font-mono text-[10px] text-slate-400 block mt-0.5">
+                            حساب: {rcp.receiverAccount}
+                          </span>
+                        )}
                       </td>
-                      <td className="p-3.5">{rcp.senderName || '—'}</td>
-                      <td className="p-3.5">{rcp.receiverName || 'مكتب الصرافة'}</td>
-                      <td className="p-3.5 font-medium">{rcp.customer?.name || 'غير محدد'}</td>
-                      <td className="p-3.5 font-mono text-[11px] text-slate-500">
+
+                      {/* 2. المبلغ (SDG) */}
+                      <td className="p-3.5 font-mono text-sm">
+                        {Number(rcp.amount) > 0 ? (
+                          <span className="font-black text-slate-900">
+                            {Number(rcp.amount).toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">SDG</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center space-x-1 space-x-reverse text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-lg text-xs font-bold border border-amber-300 animate-pulse">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>⚠️ غير محدد (مطلوب إدخاله)</span>
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 3. رقم العملية (Bankak TXN) */}
+                      <td className="p-3.5 font-mono">
+                        <div className="flex items-center space-x-1.5 space-x-reverse">
+                          <span className="font-bold text-blue-700">{rcp.transactionId || '—'}</span>
+                          {rcp.transactionId && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleCopyTxn(rcp.transactionId, e)}
+                              className="p-1 text-slate-400 hover:text-blue-600 rounded transition-colors"
+                              title="نسخ رقم العملية"
+                            >
+                              {copiedTxnId === rcp.transactionId ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 block font-mono">{rcp.receiptNumber}</span>
+                      </td>
+
+                      {/* 4. اسم المرسل */}
+                      <td className="p-3.5">
+                        <span className="font-medium text-slate-800 block">{rcp.senderName || '—'}</span>
+                        {rcp.senderAccount && (
+                          <span className="font-mono text-[10px] text-slate-400 block mt-0.5">
+                            حساب: {rcp.senderAccount}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 5. العميل المرتبط */}
+                      <td className="p-3.5 font-medium">{rcp.customer?.name || <span className="text-slate-400">غير محدد</span>}</td>
+
+                      {/* 6. التاريخ والوقت */}
+                      <td className="p-3.5 font-mono text-[11px] text-slate-500 whitespace-nowrap">
                         {rcp.transactionDate} {rcp.transactionTime}
                       </td>
+
+                      {/* 7. دقة OCR */}
                       <td className="p-3.5">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                           rcp.ocrConfidence >= 80 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
@@ -951,7 +1129,11 @@ export default function ReceiptsPage() {
                           {rcp.ocrConfidence}%
                         </span>
                       </td>
+
+                      {/* 8. الحالة */}
                       <td className="p-3.5">{getStatusBadge(rcp.status)}</td>
+
+                      {/* 9. الإجراءات */}
                       <td className="p-3.5 text-center">
                         <button
                           onClick={() => openReview(rcp)}
@@ -1075,6 +1257,21 @@ export default function ReceiptsPage() {
                         <span className="font-bold font-mono text-amber-700">{uploadSummary.needsReview}</span>
                       </div>
                     </div>
+                  )}
+                  {uploadSummary.total > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadModalOpen(false);
+                        setUploadSummary(null);
+                        clearAllFiles();
+                        tableRef.current?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="mt-3 w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 space-x-reverse min-h-[40px] shadow-sm transition-all"
+                    >
+                      <Eye className="w-4 h-4 text-blue-400" />
+                      <span>الانتقال فوراً إلى جدول الإيصالات لمراجعتها واعتمادها</span>
+                    </button>
                   )}
                 </div>
               )}
@@ -1464,7 +1661,7 @@ export default function ReceiptsPage() {
                       </div>
                       <div className="flex justify-between py-0.5">
                         <span className="text-slate-400 text-[11px]">المستفيد:</span>
-                        <span className="font-medium text-white truncate max-w-[200px]">{editReceiver || 'مكتب الصرافة'}</span>
+                        <span className="font-medium text-white truncate max-w-[200px]">{editReceiver || 'غير مستخرج (يحتاج مراجعة)'}</span>
                       </div>
                     </div>
 
@@ -1535,8 +1732,18 @@ export default function ReceiptsPage() {
                       disabled={reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
                       value={editAmount}
                       onChange={(e) => setEditAmount(e.target.value)}
-                      className="w-full px-3.5 py-2.5 font-mono text-sm font-black rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px] disabled:bg-slate-100"
+                      className={`w-full px-3.5 py-2.5 font-mono text-sm font-black rounded-xl border focus:ring-2 focus:ring-blue-500 min-h-[44px] disabled:bg-slate-100 ${
+                        !editAmount || Number(editAmount) <= 0
+                          ? 'border-amber-400 bg-amber-50/50 text-amber-900'
+                          : 'border-slate-300'
+                      }`}
                     />
+                    {(!editAmount || Number(editAmount) <= 0) && (
+                      <p className="text-[11px] text-amber-700 font-bold mt-1.5 flex items-center space-x-1 space-x-reverse">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>المبلغ غير محدد أو صفري — يجب إدخال المبلغ الفعلي من الصورة قبل الاعتماد</span>
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1690,8 +1897,16 @@ export default function ReceiptsPage() {
                       </button>
                       <button
                         onClick={handleApprove}
-                        disabled={processingAction || reviewReceipt.status === 'approved' || reviewReceipt.status === 'duplicate' || reviewReceipt.status === 'rejected'}
+                        disabled={
+                          processingAction ||
+                          !editAmount ||
+                          Number(editAmount) <= 0 ||
+                          reviewReceipt.status === 'approved' ||
+                          reviewReceipt.status === 'duplicate' ||
+                          reviewReceipt.status === 'rejected'
+                        }
                         className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse disabled:opacity-40 min-h-[44px]"
+                        title={!editAmount || Number(editAmount) <= 0 ? 'يجب إدخال مبلغ أكبر من صفر للاعتماد' : undefined}
                       >
                         <Check className="w-4 h-4 shrink-0" />
                         <span>الاعتماد المالي وقيد اليومية</span>

@@ -119,9 +119,9 @@ export async function uploadReceiptImage(
 
     const timeoutPromise = new Promise<UploadReceiptResult>((resolve) => {
       setTimeout(() => {
-        console.warn('Supabase upload timed out after 8s, falling back to local storage');
+        console.warn('Supabase upload timed out after 3.5s, falling back to local storage');
         saveLocalFallback(fileBuffer, fileId).then(resolve);
-      }, 8000);
+      }, 3500);
     });
 
     return await Promise.race([uploadPromise, timeoutPromise]);

@@ -151,8 +151,11 @@ export async function POST(req: NextRequest) {
       );
 
       let status: string = riskAssessment.status;
-      // Low OCR confidence or missing critical fields mandates manual review status
-      if (status === 'pending_verification' && (parsed.ocrConfidence < 70 || amount <= 0 || !transactionId || parsed.extractedFieldsCount < 2)) {
+      // Low OCR confidence, unextracted/zero amount, or missing critical fields mandates manual review status
+      if (
+        status === 'pending_verification' &&
+        (parsed.ocrConfidence < 70 || amount <= 0 || !transactionId || parsed.amountNeedsReview || parsed.extractedFieldsCount < 2)
+      ) {
         status = 'pending_review';
       }
 
