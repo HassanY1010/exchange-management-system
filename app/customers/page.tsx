@@ -32,7 +32,12 @@ import {
   Clock,
   Eye,
   ChevronRight,
+  ArrowDownLeft,
   Scale,
+  Lock,
+  Unlock,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function CustomersPage() {
@@ -86,6 +91,25 @@ export default function CustomersPage() {
 
   // Lightbox View Image State
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+
+  // User info for RBAC
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  useEffect(() => {
+    fetch('/api/v1/auth/me')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) setCurrentUser(d.user);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Account Closing & Reopening State
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
+  const [reopenModalOpen, setReopenModalOpen] = useState(false);
+  const [closeReason, setCloseReason] = useState('');
+  const [reopenReason, setReopenReason] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSubmitting, setActionSubmitting] = useState(false);
 
   // Calculation for New Operation preview
   const calculatedEgp = useMemo(() => {
@@ -211,7 +235,66 @@ export default function CustomersPage() {
     setDetailTab(initialTab);
     setOpFeedback(null);
     setPayoutFeedback(null);
+    setActionError(null);
     fetchCustomerDetails(cust.id);
+  };
+
+  const handleCloseAccount = async () => {
+    if (!detailCustomer) return;
+    setActionSubmitting(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/v1/customers/${detailCustomer.id}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: closeReason,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        if (data.blockingReasons && data.blockingReasons.length > 0) {
+          setActionError(data.blockingReasons.join(' • '));
+        } else {
+          setActionError(data.error || 'فشل إقفال حساب العميل');
+        }
+        return;
+      }
+      setCloseModalOpen(false);
+      setCloseReason('');
+      fetchCustomerDetails(detailCustomer.id);
+      fetchCustomers(search);
+    } catch (err: any) {
+      setActionError(err.message || 'حدث خطأ أثناء الاتصال بالخادم');
+    } finally {
+      setActionSubmitting(false);
+    }
+  };
+
+  const handleReopenAccount = async () => {
+    if (!detailCustomer) return;
+    setActionSubmitting(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/v1/customers/${detailCustomer.id}/reopen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reopenReason }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setActionError(data.error || 'فشل إعادة فتح حساب العميل');
+        return;
+      }
+      setReopenModalOpen(false);
+      setReopenReason('');
+      fetchCustomerDetails(detailCustomer.id);
+      fetchCustomers(search);
+    } catch (err: any) {
+      setActionError(err.message || 'حدث خطأ أثناء الاتصال بالخادم');
+    } finally {
+      setActionSubmitting(false);
+    }
   };
 
   const openStatement = async (cust: any) => {
@@ -552,19 +635,22 @@ export default function CustomersPage() {
                       </span>
                     </div>
                     <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1 ${
                         c.status === 'active'
                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : c.status === 'closed'
+                          ? 'bg-slate-100 text-slate-800 border border-slate-300'
                           : c.status === 'blocked'
                           ? 'bg-rose-50 text-rose-700 border border-rose-200'
                           : 'bg-slate-100 text-slate-600'
                       }`}
                     >
-                      {c.status === 'active' ? 'نشط' : c.status === 'blocked' ? 'محظور' : 'غير نشط'}
+                      {c.status === 'closed' && <Lock className="w-2.5 h-2.5" />}
+                      {c.status === 'active' ? 'نشط' : c.status === 'closed' ? 'مقفل' : c.status === 'blocked' ? 'محظور' : 'غير نشط'}
                     </span>
                   </div>
 
-                  <div className="py-3 space-y-2 text-xs text-slate-600">
+                  <div className="py-2.5 space-y-1.5 text-xs text-slate-600">
                     <div className="flex items-center space-x-2 space-x-reverse">
                       <Phone className="w-3.5 h-3.5 text-blue-500 shrink-0" />
                       <a
@@ -602,6 +688,28 @@ export default function CustomersPage() {
                         </span>
                       </div>
                     )}
+                  </div>
+
+                  {/* Isolated Multi-Currency Balance Summary */}
+                  <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-1.5 text-[10px]">
+                    <div className="bg-slate-50/80 p-1.5 rounded-lg border border-slate-100">
+                      <span className="text-slate-400 block font-medium">المدين (مطلوب منه)</span>
+                      <span className="font-bold text-slate-800 block font-mono">
+                        {(c.balances?.EGP?.debtor || 0).toLocaleString()} <span className="text-[9px] text-slate-400 font-normal">EGP</span>
+                      </span>
+                      <span className="font-medium text-slate-600 block font-mono text-[9px]">
+                        {(c.balances?.SDG?.debtor || 0).toLocaleString()} SDG
+                      </span>
+                    </div>
+                    <div className="bg-slate-50/80 p-1.5 rounded-lg border border-slate-100">
+                      <span className="text-slate-400 block font-medium">الدائن (مستحق له)</span>
+                      <span className="font-bold text-emerald-700 block font-mono">
+                        {(c.balances?.EGP?.creditor || 0).toLocaleString()} <span className="text-[9px] text-emerald-600/70 font-normal">EGP</span>
+                      </span>
+                      <span className="font-medium text-emerald-600 block font-mono text-[9px]">
+                        {(c.balances?.SDG?.creditor || 0).toLocaleString()} SDG
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -779,6 +887,107 @@ export default function CustomersPage() {
                           </div>
                         </div>
 
+                        {/* Isolated Currency Balances (Debtors & Creditors Separation) */}
+                        <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 mb-4 gap-2">
+                            <div>
+                              <h3 className="font-black text-slate-900 text-sm">أرصدة العملات والذمم المالية (مفصولة بالكامل)</h3>
+                              <p className="text-[11px] text-slate-500">فصل دقيق للمدينين والدائنين دون أي خلط أو مقاصة بين الجنيه المصري والسوداني</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {customerDetails?.status === 'active' && (
+                                <button
+                                  onClick={() => {
+                                    setActionError(null);
+                                    setCloseModalOpen(true);
+                                  }}
+                                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs"
+                                >
+                                  <Lock className="w-3.5 h-3.5" />
+                                  <span>إقفال الحساب</span>
+                                </button>
+                              )}
+                              {customerDetails?.status === 'closed' && currentUser?.role === 'admin' && (
+                                <button
+                                  onClick={() => {
+                                    setActionError(null);
+                                    setReopenModalOpen(true);
+                                  }}
+                                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-xs"
+                                >
+                                  <Unlock className="w-3.5 h-3.5" />
+                                  <span>إعادة فتح الحساب</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Status Banner if Closed */}
+                          {customerDetails?.status === 'closed' && (
+                            <div className="mb-4 p-3.5 bg-slate-100 border border-slate-300 rounded-xl flex items-center gap-2.5 text-slate-800 text-xs">
+                              <Lock className="w-4 h-4 text-slate-600 shrink-0" />
+                              <div className="flex-1">
+                                <span className="font-bold block">هذا الحساب مقفل ومجمد حالياً</span>
+                                <span className="text-[11px] text-slate-500">
+                                  تم إيقاف إنشاء العمليات وإرفاق الإيصالات وصرف النقدية.
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                            {/* EGP Balances Box */}
+                            <div className="p-4 bg-emerald-50/50 border border-emerald-200/80 rounded-xl space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-emerald-200/60">
+                                <span className="font-bold text-xs text-emerald-900 flex items-center gap-1.5">
+                                  <Wallet className="w-3.5 h-3.5 text-emerald-700" />
+                                  الجنيه المصري (EGP)
+                                </span>
+                                <span className="text-[10px] font-mono bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">EGP</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div>
+                                  <span className="text-[11px] text-slate-500 block">المدين (مطلوب منه):</span>
+                                  <span className="font-bold text-slate-900 font-mono text-sm">
+                                    {(customerDetails?.currencyBalances?.EGP?.debtor || 0).toLocaleString()} EGP
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-[11px] text-slate-500 block">الدائن (مستحق له):</span>
+                                  <span className="font-bold text-emerald-700 font-mono text-sm">
+                                    {(customerDetails?.currencyBalances?.EGP?.creditor || 0).toLocaleString()} EGP
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* SDG Balances Box */}
+                            <div className="p-4 bg-blue-50/50 border border-blue-200/80 rounded-xl space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-blue-200/60">
+                                <span className="font-bold text-xs text-blue-900 flex items-center gap-1.5">
+                                  <ArrowDownLeft className="w-3.5 h-3.5 text-blue-700" />
+                                  الجنيه السوداني (SDG)
+                                </span>
+                                <span className="text-[10px] font-mono bg-blue-100 text-blue-800 px-2 py-0.5 rounded">SDG</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div>
+                                  <span className="text-[11px] text-slate-500 block">المدين (مطلوب منه):</span>
+                                  <span className="font-bold text-slate-900 font-mono text-sm">
+                                    {(customerDetails?.currencyBalances?.SDG?.debtor || 0).toLocaleString()} SDG
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-[11px] text-slate-500 block">الدائن (مستحق له):</span>
+                                  <span className="font-bold text-blue-700 font-mono text-sm">
+                                    {(customerDetails?.currencyBalances?.SDG?.creditor || 0).toLocaleString()} SDG
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
                         {/* Recent Operations Quick List */}
                         <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 sm:p-5">
                           <div className="flex items-center justify-between mb-4">
@@ -841,6 +1050,18 @@ export default function CustomersPage() {
                             أدخل إجمالي المبلغ المحول بالجنيه السوداني (SDG) وسعر الصرف لحساب القيمة المقابلة بالجنيه المصري (EGP) تلقائياً، وارفع صور الإيصالات الداعمة دفعة واحدة.
                           </p>
                         </div>
+
+                        {customerDetails?.status === 'closed' && (
+                          <div className="bg-slate-100 border border-slate-300 rounded-2xl p-4 flex items-center gap-3 text-slate-800 text-xs">
+                            <Lock className="w-5 h-5 text-slate-600 shrink-0" />
+                            <div>
+                              <h5 className="font-bold">حساب العميل مقفل حالياً</h5>
+                              <p className="text-slate-500 text-[11px] mt-0.5">
+                                لا يمكن إنشاء عمليات جديدة أو إرفاق إيصالات لحساب مقفل.
+                              </p>
+                            </div>
+                          </div>
+                        )}
 
                         {opFeedback && (
                           <div
@@ -983,7 +1204,7 @@ export default function CustomersPage() {
                           <div className="pt-4 flex justify-end">
                             <button
                               type="submit"
-                              disabled={opSaving || calculatedEgp <= 0}
+                              disabled={opSaving || calculatedEgp <= 0 || customerDetails?.status === 'closed'}
                               className="px-6 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-blue-500/20 disabled:opacity-50 flex items-center space-x-2 space-x-reverse"
                             >
                               {opSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
@@ -1063,10 +1284,16 @@ export default function CustomersPage() {
                                       {remainingEgp > 0 && (
                                         <button
                                           onClick={() => openPayoutDialog(session)}
-                                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-sm flex items-center space-x-1 space-x-reverse"
+                                          disabled={customerDetails?.status === 'closed'}
+                                          className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm flex items-center space-x-1 space-x-reverse ${
+                                            customerDetails?.status === 'closed'
+                                              ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                                              : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white'
+                                          }`}
+                                          title={customerDetails?.status === 'closed' ? 'لا يمكن صرف نقدية لحساب مقفل' : undefined}
                                         >
                                           <DollarSign className="w-3.5 h-3.5" />
-                                          <span>تسجيل دفعة نقدية</span>
+                                          <span>{customerDetails?.status === 'closed' ? 'الحساب مقفل' : 'تسجيل دفعة نقدية'}</span>
                                         </button>
                                       )}
                                     </div>
@@ -1626,6 +1853,49 @@ export default function CustomersPage() {
                     </div>
                   </div>
 
+                  {/* Currency Balances (Debtors & Creditors Separation in Statement) */}
+                  {statementData.currencyBalances && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                        <div className="font-bold text-slate-800 flex justify-between border-b border-slate-200 pb-1">
+                          <span>رصيد الجنيه المصري (EGP)</span>
+                          <span className="font-mono text-[10px] bg-slate-200 px-1.5 rounded">EGP</span>
+                        </div>
+                        <div className="flex justify-between font-mono text-[11px] pt-1">
+                          <span className="text-slate-500 font-sans">المدين (مطلوب من العميل):</span>
+                          <span className="font-bold text-slate-900">
+                            {(statementData.currencyBalances.EGP?.debtor || 0).toLocaleString()} EGP
+                          </span>
+                        </div>
+                        <div className="flex justify-between font-mono text-[11px]">
+                          <span className="text-slate-500 font-sans">الدائن (مستحق للعميل):</span>
+                          <span className="font-bold text-emerald-700">
+                            {(statementData.currencyBalances.EGP?.creditor || 0).toLocaleString()} EGP
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                        <div className="font-bold text-slate-800 flex justify-between border-b border-slate-200 pb-1">
+                          <span>رصيد الجنيه السوداني (SDG)</span>
+                          <span className="font-mono text-[10px] bg-slate-200 px-1.5 rounded">SDG</span>
+                        </div>
+                        <div className="flex justify-between font-mono text-[11px] pt-1">
+                          <span className="text-slate-500 font-sans">المدين (مطلوب من العميل):</span>
+                          <span className="font-bold text-slate-900">
+                            {(statementData.currencyBalances.SDG?.debtor || 0).toLocaleString()} SDG
+                          </span>
+                        </div>
+                        <div className="flex justify-between font-mono text-[11px]">
+                          <span className="text-slate-500 font-sans">الدائن (مستحق للعميل):</span>
+                          <span className="font-bold text-blue-700">
+                            {(statementData.currencyBalances.SDG?.creditor || 0).toLocaleString()} SDG
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Statements Table */}
                   <div className="border border-slate-200 rounded-2xl overflow-hidden">
                     <div className="overflow-x-auto">
@@ -1709,6 +1979,184 @@ export default function CustomersPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Account Closing Modal */}
+        {closeModalOpen && detailCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-5 sm:p-6 text-right space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-900 text-base">إقفال حساب العميل</h3>
+                    <p className="text-[11px] text-slate-500">{detailCustomer.name} ({detailCustomer.customerCode})</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setCloseModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Balances & Validation Checklist */}
+              <div className="space-y-2.5">
+                <h4 className="text-xs font-bold text-slate-700">فحص أرصدة العملات والالتزامات المعلقة:</h4>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    <span className="text-[10px] text-slate-500 block">رصيد الجنيه المصري (EGP)</span>
+                    <span className="font-bold text-slate-800 font-mono block">
+                      مدين: {(customerDetails?.currencyBalances?.EGP?.debtor || 0).toLocaleString()} EGP
+                    </span>
+                    <span className="font-bold text-emerald-700 font-mono block">
+                      دائن: {(customerDetails?.currencyBalances?.EGP?.creditor || 0).toLocaleString()} EGP
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    <span className="text-[10px] text-slate-500 block">رصيد الجنيه السوداني (SDG)</span>
+                    <span className="font-bold text-slate-800 font-mono block">
+                      مدين: {(customerDetails?.currencyBalances?.SDG?.debtor || 0).toLocaleString()} SDG
+                    </span>
+                    <span className="font-bold text-blue-700 font-mono block">
+                      دائن: {(customerDetails?.currencyBalances?.SDG?.creditor || 0).toLocaleString()} SDG
+                    </span>
+                  </div>
+                </div>
+
+                {/* Blocking reasons banner */}
+                {customerDetails?.blockingReasons && customerDetails.blockingReasons.length > 0 && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1.5">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>تنبيه: لا يمكن إقفال الحساب حتى تتم تسوية كافة الأرصدة والعمليات المعلقة:</span>
+                    </div>
+                    <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-800 pr-1">
+                      {customerDetails.blockingReasons.map((reason: string, idx: number) => (
+                        <li key={idx}>{reason}</li>
+                      ))}
+                    </ul>
+                    <p className="text-[10px] text-amber-700 font-medium pt-1 border-t border-amber-200/60">
+                      * يمنع النظام المحاسبي إقفال الحساب بوجود التزامات أو مستحقات مالية تفادياً لتجميد أموال العملاء أو تعليق تسويتها.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {actionError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-medium">
+                  {actionError}
+                </div>
+              )}
+
+              {/* Close Reason Input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  سبب الإقفال وملاحظات الإدارة:
+                </label>
+                <textarea
+                  value={closeReason}
+                  onChange={(e) => setCloseReason(e.target.value)}
+                  placeholder="مثال: انتهاء التعامل مع العميل وتصفية كافة الحسابات بالكامل..."
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500"
+                  rows={2}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setCloseModalOpen(false)}
+                  disabled={actionSubmitting}
+                  className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseAccount}
+                  disabled={actionSubmitting || !customerDetails?.canClose}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-600/20 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {actionSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>تأكيد إقفال الحساب</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Account Reopening Modal */}
+        {reopenModalOpen && detailCustomer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-5 sm:p-6 text-right space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <Unlock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-slate-900 text-base">إعادة فتح حساب العميل</h3>
+                    <p className="text-[11px] text-slate-500">{detailCustomer.name} ({detailCustomer.customerCode})</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setReopenModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                سيتم إعادة تنشيط حساب العميل وتمكينه من إجراء عمليات صرافة جديدة، وإرفاق إشعارات بنكك، وصرف الحوالات النقدية.
+              </p>
+
+              {actionError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-medium">
+                  {actionError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  سبب إعادة فتح الحساب <span className="text-rose-500">*</span>:
+                </label>
+                <textarea
+                  value={reopenReason}
+                  onChange={(e) => setReopenReason(e.target.value)}
+                  placeholder="أدخل سبب إعادة فتح الحساب لتوثيقه في سجل التدقيق (5 أحرف على الأقل)..."
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setReopenModalOpen(false)}
+                  disabled={actionSubmitting}
+                  className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReopenAccount}
+                  disabled={actionSubmitting || reopenReason.trim().length < 5}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {actionSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>تأكيد إعادة التنشيط</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

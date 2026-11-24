@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { getSystemBusinessDate, getSystemStartOfDay } from '@/lib/financial-core';
+import Decimal from 'decimal.js';
 
 export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -115,16 +116,37 @@ export async function GET(req: NextRequest) {
     expensesTodayByCurrency[exp.currency] = (expensesTodayByCurrency[exp.currency] || 0) + Number(exp.amount);
   }
 
-  // 5. Debts (strictly active, isolated by currency)
+  // 5. Debts and Customer Obligations (strictly active, isolated by currency)
   const debts = await prisma.debt.findMany({
     where: { status: { in: ['outstanding', 'partially_paid', 'overdue'] } },
   });
-  const totalCustomerDebts = debts
-    .filter((d) => d.debtorType === 'customer' && d.currency === 'EGP')
-    .reduce((sum, d) => sum + Number(d.remainingAmount), 0);
-  const totalSupplierDebts = debts
-    .filter((d) => (d.debtorType === 'supplier' || d.creditorType === 'supplier') && d.currency === 'EGP')
-    .reduce((sum, d) => sum + Number(d.remainingAmount), 0);
+
+  // Calculate Active Sessions' customer commitments (Undelivered EGP & Overpayment SDG)
+  const activeSessions = await prisma.customerSession.findMany({
+    where: { status: { in: ['open', 'pending_receipts', 'pending_delivery', 'partially_delivered', 'has_balance', 'needs_review'] } },
+    select: { requestedAmount: true, deliveredAmount: true, overpaymentAmount: true, overpaymentSettled: true },
+  });
+
+  let sessionUndeliveredEgp = new Decimal(0);
+  let sessionOverpaymentSdg = new Decimal(0);
+
+  for (const s of activeSessions) {
+    const reqD = new Decimal(s.requestedAmount?.toString() || 0);
+    const delD = new Decimal(s.deliveredAmount?.toString() || 0);
+    sessionUndeliveredEgp = sessionUndeliveredEgp.plus(Decimal.max(0, reqD.minus(delD)));
+    const overD = new Decimal(s.overpaymentAmount?.toString() || 0);
+    if (overD.greaterThan(0) && !s.overpaymentSettled) {
+      sessionOverpaymentSdg = sessionOverpaymentSdg.plus(overD);
+    }
+  }
+
+  let customerDebtorsEgp = new Decimal(0);
+  let customerDebtorsSdg = new Decimal(0);
+  let customerCreditorsEgp = sessionUndeliveredEgp;
+  let customerCreditorsSdg = sessionOverpaymentSdg;
+
+  let totalCustomerDebts = 0;
+  let totalSupplierDebts = 0;
 
   const debtsByCurrency: {
     customerReceivables: Record<string, number>;
@@ -133,14 +155,27 @@ export async function GET(req: NextRequest) {
 
   for (const d of debts) {
     const cur = d.currency;
-    const rem = Number(d.remainingAmount);
+    const remD = new Decimal(d.remainingAmount.toString());
+    const rem = remD.toNumber();
+
     if (d.debtorType === 'customer') {
       debtsByCurrency.customerReceivables[cur] = (debtsByCurrency.customerReceivables[cur] || 0) + rem;
+      if (cur === 'EGP') customerDebtorsEgp = customerDebtorsEgp.plus(remD);
+      else if (cur === 'SDG') customerDebtorsSdg = customerDebtorsSdg.plus(remD);
     }
+
+    if (d.creditorType === 'customer') {
+      if (cur === 'EGP') customerCreditorsEgp = customerCreditorsEgp.plus(remD);
+      else if (cur === 'SDG') customerCreditorsSdg = customerCreditorsSdg.plus(remD);
+    }
+
     if (d.debtorType === 'supplier' || d.creditorType === 'supplier') {
       debtsByCurrency.supplierPayables[cur] = (debtsByCurrency.supplierPayables[cur] || 0) + rem;
+      if (cur === 'EGP') totalSupplierDebts += rem;
     }
   }
+
+  totalCustomerDebts = customerDebtorsEgp.toNumber();
 
   // 6. RBAC-Protected Recent Ledger Entries
   const canViewLedger = ['admin', 'accountant'].includes(user.role);
@@ -277,6 +312,21 @@ export async function GET(req: NextRequest) {
     totalCustomerDebts: isFinanceRole ? totalCustomerDebts : 0,
     totalSupplierDebts: isFinanceRole ? totalSupplierDebts : 0,
     debtsByCurrency: isFinanceRole ? debtsByCurrency : { customerReceivables: {}, supplierPayables: {} },
+    customerBalances: isFinanceRole
+      ? {
+          debtors: {
+            EGP: customerDebtorsEgp.toNumber(),
+            SDG: customerDebtorsSdg.toNumber(),
+          },
+          creditors: {
+            EGP: customerCreditorsEgp.toNumber(),
+            SDG: customerCreditorsSdg.toNumber(),
+          },
+        }
+      : {
+          debtors: { EGP: 0, SDG: 0 },
+          creditors: { EGP: 0, SDG: 0 },
+        },
   };
 
   return NextResponse.json({

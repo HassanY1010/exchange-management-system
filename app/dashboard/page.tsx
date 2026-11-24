@@ -243,6 +243,71 @@ export default function DashboardPage() {
           )}
         </div>
 
+        {/* Customer Balances: Multi-Currency Debtors & Creditors Separation */}
+        {permissions?.canViewAllBalances && (
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 mb-4 gap-1">
+              <div>
+                <h3 className="font-black text-slate-900 text-sm sm:text-base">أرصدة العملاء (فصل المدينين والدائنين بالعملة)</h3>
+                <p className="text-[11px] sm:text-xs text-slate-500">فصل محاسبي دقيق بين الجنيه المصري والسوداني دون مقاصة آلية</p>
+              </div>
+              <Link href="/customers" className="text-xs font-bold text-blue-600 hover:text-blue-800 self-start sm:self-auto">
+                إدارة العملاء وتفاصيل الحسابات &larr;
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              {/* Debtors EGP */}
+              <div className="bg-amber-50/60 border border-amber-200/70 p-3.5 sm:p-4 rounded-xl">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-800 mb-1.5">
+                  <span>المدينون بالجنيه المصري (EGP)</span>
+                  <Scale className="w-3.5 h-3.5 text-amber-600" />
+                </div>
+                <div className="text-lg sm:text-xl font-black text-amber-950 font-mono">
+                  {(kpi.customerBalances?.debtors?.EGP || 0).toLocaleString()} <span className="text-xs font-normal">EGP</span>
+                </div>
+                <span className="text-[10px] text-amber-700/80 block mt-1">ديون ومستحقات على العملاء للمؤسسة</span>
+              </div>
+
+              {/* Debtors SDG */}
+              <div className="bg-orange-50/60 border border-orange-200/70 p-3.5 sm:p-4 rounded-xl">
+                <div className="flex items-center justify-between text-xs font-bold text-orange-800 mb-1.5">
+                  <span>المدينون بالجنيه السوداني (SDG)</span>
+                  <Scale className="w-3.5 h-3.5 text-orange-600" />
+                </div>
+                <div className="text-lg sm:text-xl font-black text-orange-950 font-mono">
+                  {(kpi.customerBalances?.debtors?.SDG || 0).toLocaleString()} <span className="text-xs font-normal">SDG</span>
+                </div>
+                <span className="text-[10px] text-orange-700/80 block mt-1">ديون ومطالبات سودانية على العملاء</span>
+              </div>
+
+              {/* Creditors EGP */}
+              <div className="bg-emerald-50/60 border border-emerald-200/70 p-3.5 sm:p-4 rounded-xl">
+                <div className="flex items-center justify-between text-xs font-bold text-emerald-800 mb-1.5">
+                  <span>الدائنون بالجنيه المصري (EGP)</span>
+                  <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                </div>
+                <div className="text-lg sm:text-xl font-black text-emerald-950 font-mono">
+                  {(kpi.customerBalances?.creditors?.EGP || 0).toLocaleString()} <span className="text-xs font-normal">EGP</span>
+                </div>
+                <span className="text-[10px] text-emerald-700/80 block mt-1">مستحقات للعملاء بذمة الصندوق للتسليم</span>
+              </div>
+
+              {/* Creditors SDG */}
+              <div className="bg-blue-50/60 border border-blue-200/70 p-3.5 sm:p-4 rounded-xl">
+                <div className="flex items-center justify-between text-xs font-bold text-blue-800 mb-1.5">
+                  <span>الدائنون بالجنيه السوداني (SDG)</span>
+                  <ArrowDownLeft className="w-3.5 h-3.5 text-blue-600" />
+                </div>
+                <div className="text-lg sm:text-xl font-black text-blue-950 font-mono">
+                  {(kpi.customerBalances?.creditors?.SDG || 0).toLocaleString()} <span className="text-xs font-normal">SDG</span>
+                </div>
+                <span className="text-[10px] text-blue-700/80 block mt-1">أمانات وزيادات إيداع غير مسواة</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Operational Flow Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
           <div className="bg-white p-3 rounded-xl border border-slate-200 text-center sm:text-right">

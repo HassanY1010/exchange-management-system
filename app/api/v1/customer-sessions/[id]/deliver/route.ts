@@ -62,6 +62,20 @@ export async function POST(
         throw new Error('لا يمكن صرف نقدية لجلسة ملغاة');
       }
 
+      // Strict Customer Status Check: Prohibit disbursements for closed or blocked customer accounts
+      if (locked.customerId) {
+        const cust = await tx.customer.findUnique({
+          where: { id: locked.customerId },
+          select: { status: true, name: true },
+        });
+        if (cust?.status === 'closed') {
+          throw new Error(`حساب العميل (${cust.name}) مقفل حالياً. لا يمكن صرف نقدية لحساب مقفل.`);
+        }
+        if (cust?.status === 'blocked') {
+          throw new Error(`حساب العميل (${cust.name}) محظور في النظام.`);
+        }
+      }
+
       const received = new Decimal(locked.receivedAmount.toString());
       const expected = new Decimal(locked.expectedAmount.toString());
 

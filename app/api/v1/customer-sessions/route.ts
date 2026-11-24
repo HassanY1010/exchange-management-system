@@ -83,6 +83,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'لا يمكن فتح جلسة لعميل محظور في النظام' }, { status: 400 });
     }
 
+    if (customer.status === 'closed') {
+      return NextResponse.json(
+        { error: 'حساب العميل مقفل حالياً. لا يمكن فتح جلسة جديدة لعميل حسابه مقفل.', success: false },
+        { status: 400 }
+      );
+    }
+
     const calc = calculateExchange(numRequested, numRate, 'EGP_TO_SDG');
     const bDate = businessDate || new Date().toISOString().split('T')[0];
     await assertBusinessDateOpen(bDate);

@@ -44,11 +44,11 @@ export async function POST(
         throw new Error('لا يمكن الاعتماد المالي لإيصال بمبلغ صفري أو غير محدد. يرجى مراجعة وتعديل المبلغ الفعلي أولاً.');
       }
 
-      // Prohibit approving receipt for a cancelled customer session
+      // Prohibit approving receipt for a cancelled customer session or closed customer
       let currentSession: any = null;
       if (locked[0].customerSessionId) {
         const lockedSessions = await tx.$queryRawUnsafe<any[]>(
-          'SELECT id, "status", "requestedAmount", "receivedAmount", "deliveredAmount", "exchangeRate", "overpaymentSettled", "sessionNumber", "businessDate" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+          'SELECT id, "status", "requestedAmount", "receivedAmount", "deliveredAmount", "exchangeRate", "overpaymentSettled", "sessionNumber", "businessDate", "customerId" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
           locked[0].customerSessionId
         );
         if (lockedSessions && lockedSessions.length > 0) {
@@ -56,6 +56,20 @@ export async function POST(
           if (currentSession.status === 'cancelled') {
             throw new Error('لا يمكن اعتماد إيصال مالي لجلسة حسابية ملغاة');
           }
+        }
+      }
+
+      const effectiveCustomerId = locked[0].customerId || currentSession?.customerId;
+      if (effectiveCustomerId) {
+        const cust = await tx.customer.findUnique({
+          where: { id: effectiveCustomerId },
+          select: { status: true, name: true },
+        });
+        if (cust?.status === 'closed') {
+          throw new Error(`حساب العميل (${cust.name}) مقفل حالياً. لا يمكن اعتماد إيصالات مالية لحساب مقفل.`);
+        }
+        if (cust?.status === 'blocked') {
+          throw new Error(`حساب العميل (${cust.name}) محظور في النظام.`);
         }
       }
 

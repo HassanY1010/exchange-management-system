@@ -111,6 +111,26 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // If linked to a customer, verify customer is not closed or blocked
+      if (customerId) {
+        const cust = await prisma.customer.findUnique({
+          where: { id: customerId },
+          select: { status: true, name: true },
+        });
+        if (cust?.status === 'closed') {
+          return NextResponse.json(
+            { error: `حساب العميل (${cust.name}) مقفل حالياً. لا يمكن رفع إيصالات جديدة لحساب مقفل.`, success: false },
+            { status: 400 }
+          );
+        }
+        if (cust?.status === 'blocked') {
+          return NextResponse.json(
+            { error: `حساب العميل (${cust.name}) محظور في النظام.`, success: false },
+            { status: 400 }
+          );
+        }
+      }
+
       const itemStartTime = Date.now();
 
       // Parallelize OCR text extraction and Storage upload concurrently

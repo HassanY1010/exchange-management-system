@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { getSystemSettings } from '@/lib/settings/settings-service';
+import { getCustomerFinancialStatus } from '@/lib/customers/customer-balance-service';
 
 export async function GET(
   req: NextRequest,
@@ -84,6 +85,7 @@ export async function GET(
   }
 
   const settings = await getSystemSettings();
+  const financialStatus = await getCustomerFinancialStatus(customer.id);
 
   // Strict API-level RBAC: Sanitize financial data when user is data_entry
   const sanitizedSessions = sessions.map((s) => {
@@ -179,6 +181,10 @@ export async function GET(
       generatedAt: new Date().toISOString(),
       generatedBy: user.name,
       userRole: user.role,
+      currencyBalances: financialStatus?.balances || {
+        EGP: { debtor: 0, creditor: 0, net: 0 },
+        SDG: { debtor: 0, creditor: 0, net: 0 },
+      },
       sessions: sanitizedSessions,
     },
   });

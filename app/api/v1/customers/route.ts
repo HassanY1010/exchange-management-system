@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { logAuditEvent } from '@/lib/audit';
+import Decimal from 'decimal.js';
 
 export async function GET(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -45,7 +46,79 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: 'desc' },
   });
 
-  return NextResponse.json({ success: true, data: customers });
+  // Fetch all active debts for these customers in a single batch query
+  const customerIds = customers.map((c) => c.id);
+  const activeDebts = await prisma.debt.findMany({
+    where: {
+      status: { in: ['outstanding', 'partially_paid', 'overdue'] },
+      OR: [
+        { debtorType: 'customer', debtorId: { in: customerIds } },
+        { creditorType: 'customer', creditorId: { in: customerIds } },
+      ],
+    },
+  });
+
+  const enrichedCustomers = customers.map((c) => {
+    let egpDebtorD = new Decimal(0);
+    let egpCreditorD = new Decimal(0);
+    let sdgDebtorD = new Decimal(0);
+    let sdgCreditorD = new Decimal(0);
+
+    // 1. Debts
+    for (const d of activeDebts) {
+      const cur = (d.currency || '').toUpperCase();
+      const remD = new Decimal(d.remainingAmount.toString());
+      if (d.debtorType === 'customer' && d.debtorId === c.id) {
+        if (cur === 'EGP') egpDebtorD = egpDebtorD.plus(remD);
+        else if (cur === 'SDG') sdgDebtorD = sdgDebtorD.plus(remD);
+      }
+      if (d.creditorType === 'customer' && d.creditorId === c.id) {
+        if (cur === 'EGP') egpCreditorD = egpCreditorD.plus(remD);
+        else if (cur === 'SDG') sdgCreditorD = sdgCreditorD.plus(remD);
+      }
+    }
+
+    // 2. Active Sessions
+    let pendingSessionsCount = 0;
+    for (const s of c.sessions) {
+      const isCompleted = s.status === 'completed';
+      const isCancelled = s.status === 'cancelled';
+      const reqEgpD = new Decimal(s.requestedAmount?.toString() || 0);
+      const delEgpD = new Decimal(s.deliveredAmount?.toString() || 0);
+      const undeliveredEgpD = Decimal.max(0, reqEgpD.minus(delEgpD));
+      const overpaymentD = new Decimal(s.overpaymentAmount?.toString() || 0);
+
+      if (overpaymentD.greaterThan(0) && !s.overpaymentSettled) {
+        sdgCreditorD = sdgCreditorD.plus(overpaymentD);
+      }
+
+      if (!isCompleted && !isCancelled) {
+        pendingSessionsCount++;
+        if (undeliveredEgpD.greaterThan(0)) {
+          egpCreditorD = egpCreditorD.plus(undeliveredEgpD);
+        }
+      }
+    }
+
+    const canClose =
+      egpDebtorD.isZero() &&
+      egpCreditorD.isZero() &&
+      sdgDebtorD.isZero() &&
+      sdgCreditorD.isZero() &&
+      pendingSessionsCount === 0;
+
+    return {
+      ...c,
+      pendingSessionsCount,
+      canClose,
+      balances: {
+        EGP: { debtor: egpDebtorD.toNumber(), creditor: egpCreditorD.toNumber() },
+        SDG: { debtor: sdgDebtorD.toNumber(), creditor: sdgCreditorD.toNumber() },
+      },
+    };
+  });
+
+  return NextResponse.json({ success: true, data: enrichedCustomers });
 }
 
 export async function POST(req: NextRequest) {

@@ -48,6 +48,13 @@ export async function POST(
     return NextResponse.json({ error: 'لا يمكن إنشاء عملية لعميل محظور في النظام', success: false }, { status: 400 });
   }
 
+  if (customer.status === 'closed') {
+    return NextResponse.json(
+      { error: 'حساب العميل مقفل حالياً. لا يمكن إنشاء عمليات أو إرفاق إيصالات جديدة لعميل مقفل.', success: false },
+      { status: 400 }
+    );
+  }
+
   const uploadedStorageKeys: string[] = [];
 
   try {

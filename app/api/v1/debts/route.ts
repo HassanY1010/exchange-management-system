@@ -204,6 +204,32 @@ export async function POST(req: NextRequest) {
     const creditorType = isReceivable ? 'office' : partyType;
     const creditorId = isReceivable ? 'office' : effectivePartyName;
 
+    // Strict Customer Status Check: Prohibit creating new debts for closed or blocked customers
+    if (partyType === 'customer') {
+      const cust = await prisma.customer.findFirst({
+        where: {
+          OR: [
+            { id: effectivePartyName },
+            { customerCode: effectivePartyName },
+            { name: effectivePartyName },
+          ],
+        },
+        select: { status: true, name: true },
+      });
+      if (cust?.status === 'closed') {
+        return NextResponse.json(
+          { error: `حساب العميل (${cust.name}) مقفل حالياً. لا يمكن تسجيل ديون أو التزامات جديدة لحساب مقفل.`, success: false },
+          { status: 400 }
+        );
+      }
+      if (cust?.status === 'blocked') {
+        return NextResponse.json(
+          { error: `حساب العميل (${cust.name}) محظور في النظام.`, success: false },
+          { status: 400 }
+        );
+      }
+    }
+
     const count = await prisma.debt.count();
     const debtNumber = `DEBT-${Date.now()}-${count + 1}`;
     const debtDateStr = getSystemBusinessDate(body.debtDate || body.businessDate);

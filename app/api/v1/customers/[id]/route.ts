@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { logAuditEvent } from '@/lib/audit';
+import { getCustomerFinancialStatus } from '@/lib/customers/customer-balance-service';
 
 export async function GET(
   req: NextRequest,
@@ -41,6 +42,8 @@ export async function GET(
   const totalRemainingSdg = customer.sessions.reduce((sum, s) => sum + Number(s.remainingAmount || 0), 0);
   const totalOverpaymentSdg = customer.sessions.reduce((sum, s) => sum + Number(s.overpaymentAmount || 0), 0);
 
+  const financialStatus = await getCustomerFinancialStatus(customer.id);
+
   return NextResponse.json({
     success: true,
     data: {
@@ -52,6 +55,13 @@ export async function GET(
         totalRemainingSdg,
         totalOverpaymentSdg,
       },
+      financialStatus,
+      currencyBalances: financialStatus?.balances || {
+        EGP: { debtor: 0, creditor: 0, net: 0 },
+        SDG: { debtor: 0, creditor: 0, net: 0 },
+      },
+      canClose: financialStatus?.canClose ?? false,
+      blockingReasons: financialStatus?.blockingReasons || [],
     },
   });
 }
