@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import * as XLSX from 'xlsx';
@@ -41,6 +42,11 @@ import {
 } from 'lucide-react';
 
 export default function CustomersPage() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -745,9 +751,9 @@ export default function CustomersPage() {
         {/* ============================================================== */}
         {/* CUSTOMER PROFILE & INTEGRATED OPERATIONS DRAWER/MODAL           */}
         {/* ============================================================== */}
-        {detailCustomer && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-5xl max-h-[96vh] flex flex-col text-right safe-area-pb overflow-hidden">
+        {mounted && detailCustomer && createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-sm p-0 sm:p-4 touch-none" onClick={() => setDetailCustomer(null)}>
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-5xl max-h-[88dvh] sm:max-h-[92vh] flex flex-col text-right safe-area-pb overflow-hidden animate-in slide-in-from-bottom-4 duration-200" onClick={(e) => e.stopPropagation()}>
               {/* Header */}
               <div className="p-4 sm:p-6 bg-slate-900 text-white flex items-center justify-between shrink-0">
                 <div className="flex items-center space-x-3 space-x-reverse min-w-0">
@@ -1469,41 +1475,51 @@ export default function CustomersPage() {
                 )}
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ============================================================== */}
         {/* CASH PAYOUT (DELIVERY) MODAL                                   */}
         {/* ============================================================== */}
-        {payoutModalOpen && selectedSessionForPayout && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-5 sm:p-6 text-right safe-area-pb">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+        {mounted && payoutModalOpen && selectedSessionForPayout && createPortal(
+          <div
+            className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-sm p-0 sm:p-4 touch-none"
+            onClick={() => !payoutSaving && setPayoutModalOpen(false)}
+          >
+            <div
+              className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-md max-h-[85dvh] sm:max-h-[90vh] flex flex-col text-right overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white">
                 <div className="flex items-center space-x-2 space-x-reverse">
                   <DollarSign className="w-5 h-5 text-emerald-600" />
                   <h3 className="font-black text-slate-900 text-base">تسجيل صرف دفعة نقدية</h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setPayoutModalOpen(false)}
-                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg min-w-[36px] min-h-[36px] flex items-center justify-center"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {payoutFeedback && (
-                <div
-                  className={`mb-4 p-3 rounded-xl border text-xs font-bold ${
-                    payoutFeedback.type === 'success'
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-rose-50 border-rose-200 text-rose-800'
-                  }`}
-                >
-                  {payoutFeedback.message}
-                </div>
-              )}
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto overscroll-contain touch-scroll p-4 sm:p-5 space-y-4">
+                {payoutFeedback && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs font-bold ${
+                      payoutFeedback.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-rose-50 border-rose-200 text-rose-800'
+                    }`}
+                  >
+                    {payoutFeedback.message}
+                  </div>
+                )}
 
-              <form onSubmit={handleExecutePayout} className="space-y-4">
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1 font-mono">
                   <div>العملية: {selectedSessionForPayout.sessionNumber}</div>
                   <div className="text-slate-500">
@@ -1530,7 +1546,7 @@ export default function CustomersPage() {
                     step="any"
                     value={payoutAmount}
                     onChange={(e) => setPayoutAmount(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-emerald-500 min-h-[44px]"
                   />
                 </div>
 
@@ -1540,7 +1556,7 @@ export default function CustomersPage() {
                     type="text"
                     value={payoutRecipient}
                     onChange={(e) => setPayoutRecipient(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 min-h-[44px]"
                   />
                 </div>
 
@@ -1551,39 +1567,42 @@ export default function CustomersPage() {
                     value={payoutNotes}
                     onChange={(e) => setPayoutNotes(e.target.value)}
                     placeholder="دفعة أولى، تسليم يدوي..."
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 min-h-[44px]"
                   />
                 </div>
+              </div>
 
-                <div className="pt-3 flex justify-end space-x-2 space-x-reverse">
-                  <button
-                    type="button"
-                    onClick={() => setPayoutModalOpen(false)}
-                    className="px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={payoutSaving}
-                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 disabled:opacity-50 flex items-center space-x-1.5 space-x-reverse"
-                  >
-                    {payoutSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                    <span>تأكيد الصرف وإصدار السند</span>
-                  </button>
-                </div>
-              </form>
+              {/* Pinned Footer */}
+              <div className="shrink-0 bg-slate-50 border-t border-slate-100 p-4 sm:p-5 flex justify-end gap-2.5 safe-area-pb">
+                <button
+                  type="button"
+                  onClick={() => setPayoutModalOpen(false)}
+                  className="px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-100 min-h-[44px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecutePayout}
+                  disabled={payoutSaving || !payoutAmount || Number(payoutAmount) <= 0}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 disabled:opacity-50 flex items-center space-x-1.5 space-x-reverse min-h-[44px]"
+                >
+                  {payoutSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>تأكيد الصرف وإصدار السند</span>
+                </button>
+              </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ============================================================== */}
         {/* LIGHTBOX / IMAGE PREVIEW MODAL                                 */}
         {/* ============================================================== */}
-        {previewImageUrl && (
+        {mounted && previewImageUrl && createPortal(
           <div
             onClick={() => setPreviewImageUrl(null)}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 cursor-pointer"
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 cursor-pointer"
           >
             <div className="max-w-4xl max-h-[90vh] bg-white rounded-2xl overflow-hidden shadow-2xl relative" onClick={(e) => e.stopPropagation()}>
               <div className="p-3 bg-slate-900 text-white flex justify-between items-center text-xs">
@@ -1608,21 +1627,30 @@ export default function CustomersPage() {
                 <img src={previewImageUrl} alt="إيصال" className="max-w-full max-h-[75vh] object-contain rounded" />
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ============================================================== */}
         {/* CREATE CUSTOMER MODAL / BOTTOM SHEET                           */}
         {/* ============================================================== */}
-        {createModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto touch-scroll rounded-t-3xl sm:rounded-3xl shadow-2xl p-5 sm:p-6 text-right safe-area-pb">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+        {mounted && createModalOpen && createPortal(
+          <div
+            className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-sm p-0 sm:p-4 touch-none"
+            onClick={() => !saving && setCreateModalOpen(false)}
+          >
+            <div
+              className="bg-white w-full sm:max-w-lg max-h-[85dvh] sm:max-h-[90vh] flex flex-col rounded-t-3xl sm:rounded-3xl shadow-2xl text-right overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header (Fixed shrink-0) */}
+              <div className="shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white z-10">
                 <div className="flex items-center space-x-2 space-x-reverse">
                   <Users className="w-5 h-5 text-blue-600" />
                   <h3 className="font-black text-slate-900 text-base">إضافة عميل جديد للنظام</h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setCreateModalOpen(false)}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                   aria-label="إغلاق"
@@ -1631,25 +1659,26 @@ export default function CustomersPage() {
                 </button>
               </div>
 
-              {formError && (
-                <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-center space-x-2 space-x-reverse">
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>{formError}</span>
-                </div>
-              )}
+              {/* Scrollable Form Body (flex-1 overscroll-contain) */}
+              <div className="flex-1 overflow-y-auto overscroll-contain touch-scroll p-4 sm:p-5 space-y-3.5">
+                {formError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-center space-x-2 space-x-reverse">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>{formError}</span>
+                  </div>
+                )}
 
-              <form onSubmit={handleCreateCustomer} className="space-y-3.5">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    اسم العميل الكامل <span className="text-rose-500">*</span>
+                    الاسم بالكامل <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="مثال: محمد أحمد علي"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                    placeholder="مثال: عمر أحمد عبدالله"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                   />
                 </div>
 
@@ -1660,76 +1689,120 @@ export default function CustomersPage() {
                     </label>
                     <input
                       type="tel"
+                      inputMode="tel"
                       required
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+20 100 000 0000"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                      placeholder="+249 91 211 4342"
+                      dir="ltr"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 min-h-[44px] text-left"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">رقم الواتساب</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">رقم واتساب</label>
                     <input
                       type="tel"
+                      inputMode="tel"
                       value={whatsapp}
                       onChange={(e) => setWhatsapp(e.target.value)}
-                      placeholder="اختياري (سيعتمد الهاتف تلقائياً)"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                      placeholder="اتركه فارغاً لاعتماد رقم الهاتف"
+                      dir="ltr"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 min-h-[44px] text-left"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">الرقم القومي / إثبات الشخصية</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">رقم هاتف إضافي (اختياري)</label>
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      value={secondaryPhone}
+                      onChange={(e) => setSecondaryPhone(e.target.value)}
+                      placeholder="+201112233445"
+                      dir="ltr"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 min-h-[44px] text-left"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">الرقم القومي / جواز السفر</label>
                     <input
                       type="text"
                       value={identityNumber}
                       onChange={(e) => setIdentityNumber(e.target.value)}
-                      placeholder="رقم البطاقة أو جواز السفر"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 min-h-[44px]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">المدينة</label>
-                    <input
-                      type="text"
-                      value={city}
-                      onChange={(e) => setCity(e.target.value)}
-                      placeholder="القاهرة، الإسكندرية..."
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                      placeholder="رقم الهوية أو الجواز"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                     />
                   </div>
                 </div>
 
-                <div className="pt-4 flex items-center justify-end space-x-2 space-x-reverse border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setCreateModalOpen(false)}
-                    className="px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 min-h-[44px]"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 disabled:opacity-50 min-h-[44px] flex items-center space-x-2 space-x-reverse"
-                  >
-                    {saving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                    <span>تأكيد وحفظ العميل</span>
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">المدينة / الفرع</label>
+                    <input
+                      type="text"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      placeholder="القاهرة / الخرطوم"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">العنوان التفصيلي</label>
+                    <input
+                      type="text"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="المعادي / بدر / وسط البلد"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                    />
+                  </div>
                 </div>
-              </form>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات العميل</label>
+                  <textarea
+                    rows={2}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="أي ملاحظات خاصة بالعميل أو تفضيلات..."
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+                  />
+                </div>
+              </div>
+
+              {/* Pinned Bottom Footer (Fixed shrink-0) */}
+              <div className="shrink-0 bg-slate-50 border-t border-slate-100 p-4 sm:p-5 flex items-center justify-end gap-2.5 safe-area-pb">
+                <button
+                  type="button"
+                  onClick={() => setCreateModalOpen(false)}
+                  disabled={saving}
+                  className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-100 transition-colors min-h-[44px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateCustomer}
+                  disabled={saving || !name.trim() || !phone.trim()}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 disabled:opacity-50 min-h-[44px] flex items-center space-x-2 space-x-reverse transition-all"
+                >
+                  {saving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>حفظ العميل</span>
+                </button>
+              </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ============================================================== */}
         {/* PRINTABLE ACCOUNT STATEMENT MODAL                             */}
         {/* ============================================================== */}
-        {activeCustomer && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-4xl max-h-[94vh] overflow-y-auto touch-scroll p-4 sm:p-8 text-right safe-area-pb">
+        {mounted && activeCustomer && createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-sm p-0 sm:p-4 touch-none" onClick={() => setActiveCustomer(null)}>
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-4xl max-h-[88dvh] sm:max-h-[94vh] overflow-y-auto overscroll-contain touch-scroll p-4 sm:p-8 text-right safe-area-pb animate-in slide-in-from-bottom-4 duration-200" onClick={(e) => e.stopPropagation()}>
               {/* Actions Header (Screen only, hidden when printed) */}
               <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-slate-200 mb-4 sm:mb-6 no-print">
                 <div className="flex items-center space-x-2 space-x-reverse min-w-0">
@@ -1980,13 +2053,14 @@ export default function CustomersPage() {
                 </div>
               )}
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* Account Closing Modal */}
-        {closeModalOpen && detailCustomer && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-5 sm:p-6 text-right space-y-4">
+        {mounted && closeModalOpen && detailCustomer && createPortal(
+          <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 touch-none" onClick={() => !actionSubmitting && setCloseModalOpen(false)}>
+            <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[85dvh] flex flex-col text-right overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
@@ -2089,13 +2163,14 @@ export default function CustomersPage() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* Account Reopening Modal */}
-        {reopenModalOpen && detailCustomer && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-5 sm:p-6 text-right space-y-4">
+        {mounted && reopenModalOpen && detailCustomer && createPortal(
+          <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 touch-none" onClick={() => !actionSubmitting && setReopenModalOpen(false)}>
+            <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full max-h-[85dvh] flex flex-col text-right overflow-hidden p-5 sm:p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -2158,7 +2233,8 @@ export default function CustomersPage() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </DashboardLayout>

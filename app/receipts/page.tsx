@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import {
   FileCheck2,
@@ -44,6 +45,11 @@ interface PendingImageFile {
 }
 
 export default function ReceiptsPage() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const [receipts, setReceipts] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
@@ -1154,11 +1160,17 @@ export default function ReceiptsPage() {
         </div>
 
         {/* COMPREHENSIVE UPLOAD MODAL (REAL IMAGE / CAMERA / DRAG & DROP / TEXT) */}
-        {uploadModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white w-full sm:max-w-3xl max-h-[94vh] overflow-y-auto touch-scroll rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 text-right safe-area-pb">
+        {mounted && uploadModalOpen && createPortal(
+          <div
+            className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-sm p-0 sm:p-4 touch-none"
+            onClick={() => !uploading && setUploadModalOpen(false)}
+          >
+            <div
+              className="bg-white w-full sm:max-w-3xl max-h-[85dvh] sm:max-h-[90vh] flex flex-col rounded-t-3xl sm:rounded-3xl shadow-2xl text-right overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* Modal Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+              <div className="shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white z-10">
                 <div className="flex items-center space-x-2.5 space-x-reverse min-w-0">
                   <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
                     <Sparkles className="w-5 h-5" />
@@ -1173,15 +1185,19 @@ export default function ReceiptsPage() {
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setUploadModalOpen(false)}
+                  disabled={uploading}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Mode Selection Tabs */}
-              <div className="flex items-center bg-slate-100 p-1 rounded-2xl mb-4">
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto overscroll-contain touch-scroll p-4 sm:p-5 space-y-4">
+                {/* Mode Selection Tabs */}
+                <div className="flex items-center bg-slate-100 p-1 rounded-2xl mb-4">
                 <button
                   type="button"
                   onClick={() => setUploadTab('images')}
@@ -1278,7 +1294,7 @@ export default function ReceiptsPage() {
                 </div>
               )}
 
-              <form onSubmit={handleUploadSubmit} className="space-y-4">
+              <div className="space-y-4">
                 {/* Optional Customer / Session Linkage */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -1476,49 +1492,59 @@ export default function ReceiptsPage() {
                     />
                   </div>
                 )}
+              </div>
+            </div>
 
-                {/* Actions Footer */}
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setUploadModalOpen(false)}
-                    className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={uploading || (uploadTab === 'images' && selectedFiles.length === 0)}
-                    className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 active:bg-blue-800 shadow-md shadow-blue-500/20 disabled:opacity-50 min-h-[44px] flex items-center justify-center space-x-1.5 space-x-reverse"
-                  >
-                    {uploading ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
-                        <span>{uploadStageText}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-4 h-4 shrink-0" />
-                        <span>
-                          {uploadTab === 'images'
-                            ? `بدء الرفع واستخراج بيانات (${selectedFiles.length}) صور`
-                            : 'معالجة نصوص الدفعة'}
-                        </span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
+            {/* Pinned Actions Footer (Fixed shrink-0) */}
+            <div className="shrink-0 bg-slate-50 border-t border-slate-100 p-4 sm:p-5 flex items-center justify-end gap-2.5 safe-area-pb">
+              <button
+                type="button"
+                onClick={() => setUploadModalOpen(false)}
+                disabled={uploading}
+                className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold min-h-[44px] hover:bg-slate-100 transition-colors"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleUploadSubmit}
+                disabled={uploading || (uploadTab === 'images' && selectedFiles.length === 0)}
+                className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 active:bg-blue-800 shadow-md shadow-blue-500/20 disabled:opacity-50 min-h-[44px] flex items-center justify-center space-x-1.5 space-x-reverse transition-all"
+              >
+                {uploading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                    <span>{uploadStageText}</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 shrink-0" />
+                    <span>
+                      {uploadTab === 'images'
+                        ? `بدء الرفع واستخراج بيانات (${selectedFiles.length}) صور`
+                        : 'معالجة نصوص الدفعة'}
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
-        )}
+        </div>,
+        document.body
+      )}
 
         {/* SIDE-BY-SIDE REVIEW & APPROVAL MODAL / BOTTOM SHEET */}
-        {reviewReceipt && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-5xl max-h-[94vh] overflow-y-auto touch-scroll p-4 sm:p-6 text-right safe-area-pb">
-              {/* Review Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+        {mounted && reviewReceipt && createPortal(
+          <div
+            className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-sm p-0 sm:p-4 touch-none"
+            onClick={() => !processingAction && setReviewReceipt(null)}
+          >
+            <div
+              className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-5xl max-h-[85dvh] sm:max-h-[92vh] flex flex-col text-right overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Review Header (Fixed shrink-0) */}
+              <div className="shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white z-10">
                 <div className="flex items-center space-x-2 space-x-reverse min-w-0">
                   <FileCheck2 className="w-5 h-5 text-blue-600 shrink-0" />
                   <h3 className="font-black text-slate-900 text-sm sm:text-base truncate">
@@ -1526,12 +1552,17 @@ export default function ReceiptsPage() {
                   </h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setReviewReceipt(null)}
+                  disabled={processingAction}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {/* Scrollable Body (flex-1 overscroll-contain) */}
+              <div className="flex-1 overflow-y-auto overscroll-contain touch-scroll p-4 sm:p-5 space-y-4">
 
               {/* Feedback Alert Banner */}
               {modalFeedback && (
@@ -1870,56 +1901,61 @@ export default function ReceiptsPage() {
                       </div>
                     )}
                   </div>
-
-                  {/* Actions */}
-                  <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
-                    <button
-                      onClick={handleReject}
-                      disabled={processingAction || reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
-                      className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 rounded-xl text-xs font-bold transition-all disabled:opacity-40 min-h-[44px]"
-                    >
-                      رفض الإيصال
-                    </button>
-                    <div className="flex items-center space-x-2 space-x-reverse flex-wrap gap-2">
-                      {!reviewReceipt.verifiedBy && reviewReceipt.status !== 'approved' && reviewReceipt.status !== 'duplicate' && reviewReceipt.status !== 'rejected' && (
-                        <button
-                          type="button"
-                          onClick={handleVerify}
-                          disabled={processingAction}
-                          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-40 min-h-[44px]"
-                        >
-                          تأكيد التحقق البنكي (Verify)
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setReviewReceipt(null)}
-                        className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-50 min-h-[44px]"
-                      >
-                        إلغاء
-                      </button>
-                      <button
-                        onClick={handleApprove}
-                        disabled={
-                          processingAction ||
-                          !editAmount ||
-                          Number(editAmount) <= 0 ||
-                          reviewReceipt.status === 'approved' ||
-                          reviewReceipt.status === 'duplicate' ||
-                          reviewReceipt.status === 'rejected'
-                        }
-                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse disabled:opacity-40 min-h-[44px]"
-                        title={!editAmount || Number(editAmount) <= 0 ? 'يجب إدخال مبلغ أكبر من صفر للاعتماد' : undefined}
-                      >
-                        <Check className="w-4 h-4 shrink-0" />
-                        <span>الاعتماد المالي وقيد اليومية</span>
-                      </button>
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
+
+            {/* Pinned Bottom Footer (Fixed shrink-0) */}
+            <div className="shrink-0 bg-slate-50 border-t border-slate-100 p-4 sm:p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 safe-area-pb">
+              <button
+                type="button"
+                onClick={handleReject}
+                disabled={processingAction || reviewReceipt.status === 'approved' || reviewReceipt.status === 'rejected'}
+                className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 rounded-xl text-xs font-bold transition-all disabled:opacity-40 min-h-[44px]"
+              >
+                رفض الإيصال
+              </button>
+              <div className="flex items-center space-x-2 space-x-reverse flex-wrap gap-2 justify-end">
+                {!reviewReceipt.verifiedBy && reviewReceipt.status !== 'approved' && reviewReceipt.status !== 'duplicate' && reviewReceipt.status !== 'rejected' && (
+                  <button
+                    type="button"
+                    onClick={handleVerify}
+                    disabled={processingAction}
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all disabled:opacity-40 min-h-[44px]"
+                  >
+                    تأكيد التحقق البنكي (Verify)
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setReviewReceipt(null)}
+                  className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-100 min-h-[44px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={
+                    processingAction ||
+                    !editAmount ||
+                    Number(editAmount) <= 0 ||
+                    reviewReceipt.status === 'approved' ||
+                    reviewReceipt.status === 'duplicate' ||
+                    reviewReceipt.status === 'rejected'
+                  }
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center space-x-1.5 space-x-reverse disabled:opacity-40 min-h-[44px]"
+                  title={!editAmount || Number(editAmount) <= 0 ? 'يجب إدخال مبلغ أكبر من صفر للاعتماد' : undefined}
+                >
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span>الاعتماد المالي وقيد اليومية</span>
+                </button>
+              </div>
+            </div>
           </div>
-        )}
+        </div>,
+        document.body
+      )}
       </div>
     </DashboardLayout>
   );
