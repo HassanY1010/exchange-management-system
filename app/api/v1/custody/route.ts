@@ -77,9 +77,9 @@ export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
-  if (!['admin', 'accountant'].includes(user.role)) {
+  if (!['admin', 'accountant', 'custody_officer'].includes(user.role)) {
     return NextResponse.json(
-      { error: 'صلاحية تسليم العهد النقدية مقتصرة على المدير المالي أو المحاسب' },
+      { error: 'صلاحية تسليم العهد النقدية مقتصرة على المدير المالي أو المحاسب أو أمين الصندوق' },
       { status: 403 }
     );
   }
@@ -277,7 +277,7 @@ export async function POST(req: NextRequest) {
       });
 
       return { custody, custodyTxn, safeName: lockedSafe.name };
-    });
+    }, { timeout: 25000, maxWait: 20000 });
 
     return NextResponse.json({ success: true, data: result.custody }, { status: 201 });
   } catch (error: any) {

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import {
   Users,
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react';
 
 export default function CustodyPage() {
+  const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState<'custodies' | 'employees' | 'transactions'>('custodies');
   const [custodies, setCustodies] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
@@ -43,6 +45,7 @@ export default function CustodyPage() {
   const [custodyAmount, setCustodyAmount] = useState<number | string>(500000);
   const [custodyCurrency, setCustodyCurrency] = useState('EGP');
   const [custodyNotes, setCustodyNotes] = useState('');
+  const [custodyModalError, setCustodyModalError] = useState('');
   const [submittingCustody, setSubmittingCustody] = useState(false);
 
   // Deliver Cash Modal
@@ -137,6 +140,7 @@ export default function CustodyPage() {
   };
 
   useEffect(() => {
+    setMounted(true);
     loadAll();
   }, []);
 
@@ -176,15 +180,24 @@ export default function CustodyPage() {
     e.preventDefault();
     setSubmittingCustody(true);
     setErrorMessage('');
+    setCustodyModalError('');
     setStatusMessage('');
 
     try {
+      const numAmount = Number(custodyAmount);
+      if (!numAmount || isNaN(numAmount) || numAmount <= 0) {
+        throw new Error('يرجى إدخال مبلغ صحيح للعهدة أكبر من صفر');
+      }
+      if (!selectedEmpId) {
+        throw new Error('يرجى اختيار الموظف المستلم للعهدة');
+      }
+
       const res = await fetch('/api/v1/custody', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           employeeId: selectedEmpId,
-          amount: Number(custodyAmount),
+          amount: numAmount,
           currency: custodyCurrency,
           notes: custodyNotes,
         }),
@@ -197,9 +210,11 @@ export default function CustodyPage() {
 
       setNewCustodyOpen(false);
       setCustodyNotes('');
+      setCustodyModalError('');
       setStatusMessage('تم تسليم العهدة النقدية بنجاح وخصمها من الخزينة');
       await Promise.all([fetchCustodies(), fetchEmployees()]);
     } catch (err: any) {
+      setCustodyModalError(err.message || 'فشل تسليم العهدة');
       setErrorMessage(err.message);
     } finally {
       setSubmittingCustody(false);
@@ -457,7 +472,10 @@ export default function CustodyPage() {
               <span>إضافة موظف</span>
             </button>
             <button
-              onClick={() => setNewCustodyOpen(true)}
+              onClick={() => {
+                setCustodyModalError('');
+                setNewCustodyOpen(true);
+              }}
               className="flex items-center justify-center space-x-2 space-x-reverse bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-indigo-500/20 transition-all min-h-[42px]"
             >
               <Plus className="w-4 h-4" />
@@ -935,12 +953,17 @@ export default function CustodyPage() {
         )}
 
         {/* ================= MODAL: ISSUE NEW CUSTODY ================= */}
-        {newCustodyOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white w-full sm:max-w-md max-h-[92vh] overflow-y-auto touch-scroll rounded-t-3xl sm:rounded-3xl shadow-2xl p-4 sm:p-6 text-right safe-area-pb">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
-                <h3 className="font-black text-slate-900 text-base">تسليم عهدة نقدية جديدة</h3>
+        {newCustodyOpen && mounted && createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4 animate-fade-in">
+            <div className="bg-white w-full sm:max-w-md max-h-[85dvh] sm:max-h-[90dvh] flex flex-col rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden text-right">
+              {/* Header - Fixed */}
+              <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white shrink-0">
+                <div>
+                  <h3 className="font-black text-slate-900 text-base">تسليم عهدة نقدية جديدة</h3>
+                  <p className="text-[11px] text-slate-500">صرف عهدة نقدية للموظف من الصندوق</p>
+                </div>
                 <button
+                  type="button"
                   onClick={() => setNewCustodyOpen(false)}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
@@ -948,7 +971,16 @@ export default function CustodyPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleIssueCustody} className="space-y-4">
+              {/* Inline Modal Error */}
+              {custodyModalError && (
+                <div className="mx-4 sm:mx-5 mt-3 p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-bold flex items-center gap-2 shrink-0">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{custodyModalError}</span>
+                </div>
+              )}
+
+              {/* Scrollable Form Body */}
+              <form id="new-custody-form" onSubmit={handleIssueCustody} className="p-4 sm:p-5 overflow-y-auto touch-scroll flex-1 space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">الموظف المستلم للعهدة *</label>
                   <select
@@ -988,6 +1020,7 @@ export default function CustodyPage() {
                       value={custodyAmount}
                       onChange={(e) => setCustodyAmount(e.target.value)}
                       required
+                      min={1}
                       placeholder="500000"
                       className="w-full px-3.5 py-2.5 font-mono text-sm font-bold rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 min-h-[44px]"
                     />
@@ -1007,33 +1040,38 @@ export default function CustodyPage() {
                     يتم التحقق من توفر رصيد كافٍ في الخزينة وخصم المبلغ وتوثيق القيد المحاسبي آلياً
                   </p>
                 </div>
-
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewCustodyOpen(false)}
-                    className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submittingCustody}
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-indigo-500/20 disabled:opacity-50 min-h-[44px]"
-                  >
-                    {submittingCustody ? 'جاري التسليم...' : 'تأكيد تسليم العهدة'}
-                  </button>
-                </div>
               </form>
+
+              {/* Action Buttons - Fixed/Pinned at Bottom */}
+              <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/90 flex items-center justify-end gap-2.5 shrink-0 safe-area-pb">
+                <button
+                  type="button"
+                  onClick={() => setNewCustodyOpen(false)}
+                  disabled={submittingCustody}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  form="new-custody-form"
+                  disabled={submittingCustody || !custodyAmount || Number(custodyAmount) <= 0 || !selectedEmpId}
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-indigo-500/20 disabled:opacity-50 min-h-[44px] flex items-center justify-center gap-2"
+                >
+                  {submittingCustody && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  <span>{submittingCustody ? 'جاري التسليم...' : 'تأكيد تسليم العهدة'}</span>
+                </button>
+              </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ================= MODAL: DELIVER CASH TO CUSTOMER ================= */}
-        {deliverModalOpen && activeCustody && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto touch-scroll p-4 sm:p-6 text-right safe-area-pb">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+        {deliverModalOpen && activeCustody && mounted && createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4 animate-fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-lg max-h-[85dvh] sm:max-h-[90dvh] flex flex-col overflow-hidden text-right">
+              <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white shrink-0">
                 <div className="min-w-0">
                   <h3 className="font-black text-slate-900 text-sm sm:text-base truncate">تسليم نقدية لعميل من العهدة</h3>
                   <p className="text-[11px] sm:text-xs text-slate-500 truncate">
@@ -1042,6 +1080,7 @@ export default function CustodyPage() {
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setDeliverModalOpen(false)}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
@@ -1050,13 +1089,13 @@ export default function CustodyPage() {
               </div>
 
               {deliverError && (
-                <div className="mb-4 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold flex items-center space-x-2 space-x-reverse">
+                <div className="mx-4 sm:mx-5 mt-3 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold flex items-center space-x-2 space-x-reverse shrink-0">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>{deliverError}</span>
                 </div>
               )}
 
-              <form onSubmit={handleDeliverCash} className="space-y-4">
+              <form id="deliver-cash-form" onSubmit={handleDeliverCash} className="p-4 sm:p-5 overflow-y-auto touch-scroll flex-1 space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">العميل المستلم *</label>
                   <select
@@ -1098,6 +1137,7 @@ export default function CustodyPage() {
                     value={deliverAmount}
                     onChange={(e) => setDeliverAmount(e.target.value)}
                     required
+                    min={1}
                     placeholder="100000"
                     max={Number(activeCustody.currentAmount)}
                     className="w-full px-3.5 py-2.5 font-mono text-sm font-black rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
@@ -1122,33 +1162,37 @@ export default function CustodyPage() {
                     className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 min-h-[44px]"
                   />
                 </div>
-
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setDeliverModalOpen(false)}
-                    className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={delivering}
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 disabled:opacity-50 min-h-[44px]"
-                  >
-                    {delivering ? 'جاري التسليم...' : 'تأكيد التسليم للعميل'}
-                  </button>
-                </div>
               </form>
+
+              <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/90 flex items-center justify-end gap-2.5 shrink-0 safe-area-pb">
+                <button
+                  type="button"
+                  onClick={() => setDeliverModalOpen(false)}
+                  disabled={delivering}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  form="deliver-cash-form"
+                  disabled={delivering || !deliverAmount || Number(deliverAmount) <= 0 || !deliverCustomerId}
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-blue-500/20 disabled:opacity-50 min-h-[44px] flex items-center justify-center gap-2"
+                >
+                  {delivering && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  <span>{delivering ? 'جاري التسليم...' : 'تأكيد التسليم للعميل'}</span>
+                </button>
+              </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ================= MODAL: RETURN CASH TO SAFE ================= */}
-        {returnModalOpen && activeCustody && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-md max-h-[92vh] overflow-y-auto touch-scroll p-4 sm:p-6 text-right safe-area-pb">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+        {returnModalOpen && activeCustody && mounted && createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4 animate-fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-md max-h-[85dvh] sm:max-h-[90dvh] flex flex-col overflow-hidden text-right">
+              <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white shrink-0">
                 <div className="min-w-0">
                   <h3 className="font-black text-slate-900 text-base truncate">استرجاع نقدية إلى الخزينة</h3>
                   <p className="text-xs text-slate-500">
@@ -1157,6 +1201,7 @@ export default function CustodyPage() {
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setReturnModalOpen(false)}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
@@ -1165,13 +1210,13 @@ export default function CustodyPage() {
               </div>
 
               {returnError && (
-                <div className="mb-4 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold flex items-center space-x-2 space-x-reverse">
+                <div className="mx-4 sm:mx-5 mt-3 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold flex items-center space-x-2 space-x-reverse shrink-0">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>{returnError}</span>
                 </div>
               )}
 
-              <form onSubmit={handleReturnToSafe} className="space-y-4">
+              <form id="return-cash-form" onSubmit={handleReturnToSafe} className="p-4 sm:p-5 overflow-y-auto touch-scroll flex-1 space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">المبلغ المراد استرجاعه للخزينة *</label>
                   <input
@@ -1180,6 +1225,7 @@ export default function CustodyPage() {
                     value={returnAmount}
                     onChange={(e) => setReturnAmount(e.target.value)}
                     required
+                    min={1}
                     max={Number(activeCustody.currentAmount)}
                     placeholder="مبلغ الاسترجاع"
                     className="w-full px-3.5 py-2.5 font-mono text-sm font-black rounded-xl border border-slate-300 focus:ring-2 focus:ring-purple-500 min-h-[44px]"
@@ -1207,34 +1253,40 @@ export default function CustodyPage() {
                   />
                 </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setReturnModalOpen(false)}
-                    className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={returning}
-                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-purple-500/20 disabled:opacity-50 min-h-[44px]"
-                  >
-                    {returning ? 'جاري الاسترجاع...' : 'تأكيد الاسترجاع للخزينة'}
-                  </button>
-                </div>
               </form>
+
+              <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/90 flex items-center justify-end gap-2.5 shrink-0 safe-area-pb">
+                <button
+                  type="button"
+                  onClick={() => setReturnModalOpen(false)}
+                  disabled={returning}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  form="return-cash-form"
+                  disabled={returning || !returnAmount || Number(returnAmount) <= 0}
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-purple-500/20 disabled:opacity-50 min-h-[44px] flex items-center justify-center gap-2"
+                >
+                  {returning && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  <span>{returning ? 'جاري الاسترجاع...' : 'تأكيد الاسترجاع للخزينة'}</span>
+                </button>
+              </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ================= MODAL: SETTLE & CLOSE CUSTODY ================= */}
-        {settleModalOpen && activeCustody && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-md max-h-[92vh] overflow-y-auto touch-scroll p-4 sm:p-6 text-right safe-area-pb">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+        {settleModalOpen && activeCustody && mounted && createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4 animate-fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-md max-h-[85dvh] sm:max-h-[90dvh] flex flex-col overflow-hidden text-right">
+              <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white shrink-0">
                 <h3 className="font-black text-slate-900 text-base">تسوية وإغلاق العهدة النقدية</h3>
                 <button
+                  type="button"
                   onClick={() => setSettleModalOpen(false)}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
@@ -1243,13 +1295,13 @@ export default function CustodyPage() {
               </div>
 
               {settleError && (
-                <div className="mb-4 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold flex items-center space-x-2 space-x-reverse">
+                <div className="mx-4 sm:mx-5 mt-3 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold flex items-center space-x-2 space-x-reverse shrink-0">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>{settleError}</span>
                 </div>
               )}
 
-              <div className="space-y-4">
+              <div className="p-4 sm:p-5 overflow-y-auto touch-scroll flex-1 space-y-4">
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-2">
                   <div className="flex justify-between">
                     <span className="text-slate-500">الموظف المسؤول:</span>
@@ -1291,34 +1343,37 @@ export default function CustodyPage() {
                     رصيد العهدة مطابق تماماً ومستوفى بالكامل (0 {activeCustody.currency}). سيتم إغلاق العهدة وتوثيق التسوية.
                   </p>
                 )}
+              </div>
 
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setSettleModalOpen(false)}
-                    className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSettleCustody}
-                    disabled={settling}
-                    className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md disabled:opacity-50 min-h-[44px]"
-                  >
-                    {settling ? 'جاري التسوية...' : 'تأكيد التسوية والإغلاق'}
-                  </button>
-                </div>
+              <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/90 flex items-center justify-end gap-2.5 shrink-0 safe-area-pb">
+                <button
+                  type="button"
+                  onClick={() => setSettleModalOpen(false)}
+                  disabled={settling}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSettleCustody}
+                  disabled={settling}
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md disabled:opacity-50 min-h-[44px] flex items-center justify-center gap-2"
+                >
+                  {settling && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  <span>{settling ? 'جاري التسوية...' : 'تأكيد التسوية والإغلاق'}</span>
+                </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ================= MODAL: CUSTODY HISTORY ================= */}
-        {historyModalOpen && historyCustody && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto touch-scroll p-4 sm:p-6 text-right safe-area-pb">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+        {historyModalOpen && historyCustody && mounted && createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4 animate-fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-lg max-h-[85dvh] sm:max-h-[90dvh] flex flex-col overflow-hidden text-right">
+              <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white shrink-0">
                 <div>
                   <h3 className="font-black text-slate-900 text-base">سجل حركات العهدة التفصيلي</h3>
                   <p className="text-xs text-slate-500">
@@ -1326,6 +1381,7 @@ export default function CustodyPage() {
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setHistoryModalOpen(false)}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
@@ -1333,7 +1389,7 @@ export default function CustodyPage() {
                 </button>
               </div>
 
-              <div className="space-y-2.5">
+              <div className="p-4 sm:p-5 overflow-y-auto touch-scroll flex-1 space-y-2.5">
                 {(historyCustody.transactions || []).length === 0 && (
                   <div className="p-6 text-center text-slate-400 text-xs">لا توجد حركات مسجلة لهذه العهدة</div>
                 )}
@@ -1364,27 +1420,30 @@ export default function CustodyPage() {
                 })}
               </div>
 
-              <div className="pt-4 mt-4 border-t border-slate-100 flex justify-end">
+              <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/90 flex justify-end shrink-0 safe-area-pb">
                 <button
+                  type="button"
                   onClick={() => setHistoryModalOpen(false)}
-                  className="px-5 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs"
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs sm:text-sm min-h-[44px]"
                 >
                   إغلاق
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ================= MODAL: ADD / EDIT EMPLOYEE ================= */}
-        {employeeModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4">
-            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-md max-h-[92vh] overflow-y-auto touch-scroll p-4 sm:p-6 text-right safe-area-pb">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4 sticky top-0 bg-white z-10">
+        {employeeModalOpen && mounted && createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4 animate-fade-in">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-md max-h-[85dvh] sm:max-h-[90dvh] flex flex-col overflow-hidden text-right">
+              <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-white shrink-0">
                 <h3 className="font-black text-slate-900 text-base">
                   {editingEmployee ? 'تعديل بيانات الموظف' : 'إضافة موظف تسليم جديد'}
                 </h3>
                 <button
+                  type="button"
                   onClick={() => setEmployeeModalOpen(false)}
                   className="p-2 text-slate-400 hover:text-slate-600 rounded-lg min-w-[40px] min-h-[40px] flex items-center justify-center -ml-2"
                 >
@@ -1393,13 +1452,13 @@ export default function CustodyPage() {
               </div>
 
               {empError && (
-                <div className="mb-4 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold flex items-center space-x-2 space-x-reverse">
+                <div className="mx-4 sm:mx-5 mt-3 p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs font-bold flex items-center space-x-2 space-x-reverse shrink-0">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>{empError}</span>
                 </div>
               )}
 
-              <form onSubmit={handleSaveEmployee} className="space-y-4">
+              <form id="employee-form" onSubmit={handleSaveEmployee} className="p-4 sm:p-5 overflow-y-auto touch-scroll flex-1 space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">اسم الموظف بالكامل *</label>
                   <input
@@ -1445,26 +1504,30 @@ export default function CustodyPage() {
                     className="w-full px-3.5 py-2.5 font-mono text-sm rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 min-h-[44px]"
                   />
                 </div>
-
-                <div className="flex items-center justify-end space-x-2 space-x-reverse pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setEmployeeModalOpen(false)}
-                    className="px-4 py-2.5 border border-slate-300 text-slate-700 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
-                  >
-                    إلغاء
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={savingEmployee}
-                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-indigo-500/20 disabled:opacity-50 min-h-[44px]"
-                  >
-                    {savingEmployee ? 'جاري الحفظ...' : editingEmployee ? 'حفظ التعديلات' : 'إضافة الموظف'}
-                  </button>
-                </div>
               </form>
+
+              <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/90 flex items-center justify-end gap-2.5 shrink-0 safe-area-pb">
+                <button
+                  type="button"
+                  onClick={() => setEmployeeModalOpen(false)}
+                  disabled={savingEmployee}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl text-xs sm:text-sm font-bold min-h-[44px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  form="employee-form"
+                  disabled={savingEmployee || !empName.trim() || !empPhone.trim()}
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md shadow-indigo-500/20 disabled:opacity-50 min-h-[44px] flex items-center justify-center gap-2"
+                >
+                  {savingEmployee && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  <span>{savingEmployee ? 'جاري الحفظ...' : editingEmployee ? 'حفظ التعديلات' : 'إضافة الموظف'}</span>
+                </button>
+              </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </DashboardLayout>
