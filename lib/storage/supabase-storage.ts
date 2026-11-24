@@ -100,19 +100,10 @@ export async function uploadReceiptImage(
         return await saveLocalFallback(fileBuffer, fileId);
       }
 
-      // Generate secure signed URL with token (valid for 24 hours, refreshed on demand)
-      const { data: signedData, error: signedError } = await supabase.storage
-        .from(defaultBucket)
-        .createSignedUrl(data.path, 86400);
-
-      if (signedError) {
-        console.warn('Warning generating signed URL:', signedError.message);
-      }
-
       return {
         storageKey: data.path,
-        signedUrl: signedData?.signedUrl,
-        publicUrl: signedData?.signedUrl,
+        signedUrl: undefined,
+        publicUrl: undefined,
         source: 'supabase_storage',
       };
     })();
@@ -170,4 +161,54 @@ export async function getReceiptSignedUrl(
   }
 
   return null;
+}
+
+/**
+ * Deletes an array of uploaded receipt images from Supabase Storage or local storage fallback.
+ * Used during rollback to ensure zero orphaned files when a database transaction fails.
+ */
+export async function deleteReceiptImages(
+  storageKeys: string[]
+): Promise<{ deleted: string[]; errors: string[] }> {
+  const deleted: string[] = [];
+  const errors: string[] = [];
+
+  for (const key of storageKeys) {
+    if (!key || key === 'no-image') continue;
+
+    try {
+      if (key.startsWith('local:')) {
+        const relativePath = key.replace(/^local:/, '');
+        const fullPath = path.join(process.cwd(), 'storage', relativePath);
+        if (fs.existsSync(fullPath)) {
+          await fs.promises.unlink(fullPath);
+          deleted.push(key);
+        }
+      } else if (supabase) {
+        let cleanPath = key;
+        if (cleanPath.startsWith('http')) {
+          const match = cleanPath.match(/\/receipts\/(receipts\/.+)$/);
+          if (match) cleanPath = match[1];
+        }
+        cleanPath = cleanPath.replace(/^local:/, '');
+        const { error } = await supabase.storage.from(defaultBucket).remove([cleanPath]);
+        if (error) {
+          errors.push(`${key}: ${error.message}`);
+        } else {
+          deleted.push(key);
+        }
+      } else {
+        // Fallback check if it was saved locally with just fileId
+        const localPath = path.join(process.cwd(), 'storage', 'receipts', key);
+        if (fs.existsSync(localPath)) {
+          await fs.promises.unlink(localPath);
+          deleted.push(key);
+        }
+      }
+    } catch (err: any) {
+      errors.push(`${key}: ${err.message}`);
+    }
+  }
+
+  return { deleted, errors };
 }

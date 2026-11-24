@@ -10,6 +10,16 @@ export async function GET(
   const user = await getUserFromRequest(req);
   if (!user) return authError();
 
+  const allowedRoles = ['admin', 'accountant', 'data_entry', 'custody_officer'];
+  if (!allowedRoles.includes(user.role)) {
+    return NextResponse.json(
+      { error: 'غير مصرح لك بالاطلاع على كشف حساب العميل', success: false },
+      { status: 403 }
+    );
+  }
+
+  const isDataEntry = user.role === 'data_entry';
+
   const customer = await prisma.customer.findUnique({
     where: { id: params.id },
   });
@@ -37,10 +47,11 @@ export async function GET(
     where: sessionsWhere,
     include: {
       receipts: {
-        where: { status: 'approved' },
+        orderBy: { createdAt: 'desc' },
       },
       vouchers: {
         where: { status: 'issued' },
+        orderBy: { paidAt: 'desc' },
       },
       transactions: true,
     },
@@ -74,6 +85,52 @@ export async function GET(
 
   const settings = await getSystemSettings();
 
+  // Strict API-level RBAC: Sanitize financial data when user is data_entry
+  const sanitizedSessions = sessions.map((s) => {
+    if (isDataEntry) {
+      return {
+        id: s.id,
+        sessionNumber: s.sessionNumber,
+        businessDate: s.businessDate,
+        currencyFrom: s.currencyFrom,
+        currencyTo: s.currencyTo,
+        exchangeRate: s.exchangeRate,
+        expectedAmount: s.expectedAmount,
+        receivedAmount: s.receivedAmount,
+        requestedAmount: s.requestedAmount,
+        deliveredAmount: s.deliveredAmount,
+        remainingAmount: s.remainingAmount,
+        status: s.status,
+        createdAt: s.createdAt,
+        createdBy: s.createdBy,
+        receipts: s.receipts.map((r) => ({
+          id: r.id,
+          receiptNumber: r.receiptNumber,
+          transactionId: r.transactionId,
+          amount: r.amount,
+          currency: r.currency,
+          senderName: r.senderName,
+          receiverName: r.receiverName,
+          transactionDate: r.transactionDate,
+          status: r.status,
+          imageStorageKey: r.imageStorageKey,
+          createdAt: r.createdAt,
+          createdBy: r.createdBy,
+        })),
+        vouchers: s.vouchers.map((v) => ({
+          id: v.id,
+          voucherNumber: v.voucherNumber,
+          amount: v.amount,
+          currency: v.currency,
+          paidAt: v.paidAt,
+          status: v.status,
+        })),
+        transactions: [], // Internal ledger transactions completely excluded from data_entry
+      };
+    }
+    return s;
+  });
+
   return NextResponse.json({
     success: true,
     statement: {
@@ -83,7 +140,7 @@ export async function GET(
         logo: settings.company_logo || '/brand/logo.png',
         phone: settings.company_phone || '+20 100 000 0000',
         address: settings.company_address || 'القاهرة، جمهورية مصر العربية',
-        taxNumber: settings.company_tax_number || '100-200-300',
+        taxNumber: isDataEntry ? undefined : (settings.company_tax_number || '100-200-300'),
       },
       customer: {
         id: customer.id,
@@ -94,24 +151,35 @@ export async function GET(
         whatsapp: customer.whatsapp,
         city: customer.city,
         address: customer.address,
-        identityNumber: customer.identityNumber,
+        identityNumber: isDataEntry
+          ? (customer.identityNumber ? '****' + customer.identityNumber.slice(-4) : null)
+          : customer.identityNumber,
         status: customer.status,
       },
-      summary: {
-        totalReceivedSdg,
-        totalDeliveredEgp,
-        totalRequestedEgp,
-        totalExpectedSdg,
-        totalRemainingSdg,
-        totalOverpaymentSdg,
-        sessionsCount: sessions.length,
-        completedCount,
-        pendingDeliveryCount,
-      },
+      summary: isDataEntry
+        ? {
+            totalReceivedSdg,
+            totalExpectedSdg,
+            totalRemainingSdg,
+            sessionsCount: sessions.length,
+            completedCount,
+            pendingDeliveryCount,
+          }
+        : {
+            totalReceivedSdg,
+            totalDeliveredEgp,
+            totalRequestedEgp,
+            totalExpectedSdg,
+            totalRemainingSdg,
+            totalOverpaymentSdg,
+            sessionsCount: sessions.length,
+            completedCount,
+            pendingDeliveryCount,
+          },
       generatedAt: new Date().toISOString(),
       generatedBy: user.name,
       userRole: user.role,
-      sessions,
+      sessions: sanitizedSessions,
     },
   });
 }

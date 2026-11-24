@@ -77,16 +77,18 @@ export async function POST(
         }
       }
 
-      const amountEgp = Number(body.amountEgp || locked.requestedAmount);
-      if (isNaN(amountEgp) || amountEgp <= 0) {
-        throw new Error('المبلغ المسلم يجب أن يكون رقماً أكبر من الصفر');
+      const rawAmountEgp = body.amountEgp !== undefined && body.amountEgp !== null ? body.amountEgp : locked.requestedAmount;
+      const dAmountEgp = new Decimal(rawAmountEgp.toString());
+      if (dAmountEgp.isNegative() || dAmountEgp.isZero() || isNaN(dAmountEgp.toNumber())) {
+        throw new Error('المبلغ المسلم يجب أن يكون رقماً موجباً أكبر من الصفر');
       }
+      const amountEgp = dAmountEgp.toDecimalPlaces(4).toNumber();
 
       // Check remaining EGP: Prevent over-delivery beyond requested session amount
       const remainingEgp = new Decimal(locked.requestedAmount.toString()).minus(locked.deliveredAmount.toString());
-      if (new Decimal(amountEgp).greaterThan(remainingEgp.plus(0.0001))) {
+      if (dAmountEgp.greaterThan(remainingEgp.plus(0.0001))) {
         throw new Error(
-          `المبلغ المطلوب صرفه (${amountEgp.toLocaleString()} EGP) يتجاوز الرصيد المتبقي للتسليم في هذه الجلسة (${remainingEgp.toFixed(2)} EGP)`
+          `المبلغ المطلوب صرفه (${dAmountEgp.toFixed(2)} EGP) يتجاوز الرصيد المتبقي للتسليم في هذه الجلسة (${remainingEgp.toFixed(2)} EGP)`
         );
       }
 
@@ -223,12 +225,13 @@ export async function POST(
         },
       });
 
-      // 4. Update Customer Session State atomically
-      const newDelivered = Number(locked.deliveredAmount) + amountEgp;
-      const requestedAmount = Number(locked.requestedAmount);
-      const isNowFullyDelivered = newDelivered >= requestedAmount;
+      // 4. Update Customer Session State atomically using Decimal precision
+      const currentDeliveredD = new Decimal(locked.deliveredAmount.toString());
+      const newDeliveredD = currentDeliveredD.plus(dAmountEgp);
+      const requestedD = new Decimal(locked.requestedAmount.toString());
+      const isNowFullyDelivered = newDeliveredD.greaterThanOrEqualTo(requestedD.minus(0.0001));
       const isNowFullyPaid = new Decimal(locked.receivedAmount.toString()).greaterThanOrEqualTo(new Decimal(locked.expectedAmount.toString()).minus(0.0001));
-      const hasUnsettledOverpayment = Number(locked.overpaymentAmount || 0) > 0 && !locked.overpaymentSettled;
+      const hasUnsettledOverpayment = new Decimal(locked.overpaymentAmount?.toString() || 0).greaterThan(0) && !locked.overpaymentSettled;
 
       // Only mark completed if fully delivered, fully paid, AND overpayment settled (if any)
       let nextStatus = 'partially_delivered';
@@ -250,7 +253,7 @@ export async function POST(
       const updatedSession = await tx.customerSession.update({
         where: { id: locked.id },
         data: {
-          deliveredAmount: newDelivered,
+          deliveredAmount: newDeliveredD.toFixed(4),
           status: nextStatus,
           closedAt: nextStatus === 'completed' ? new Date() : null,
           closedBy: nextStatus === 'completed' ? user.name : null,
