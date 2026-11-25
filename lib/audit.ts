@@ -91,7 +91,9 @@ export async function logAuditEvent(params: CreateAuditLogParams) {
   };
 
   try {
-    await ensureDatabaseSchema();
+    if (!params.tx) {
+      await ensureDatabaseSchema();
+    }
     return await client.auditLog.create({
       data: insertData,
     });

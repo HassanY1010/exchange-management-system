@@ -7,6 +7,7 @@ import { uploadReceiptImage } from '@/lib/storage/supabase-storage';
 import { logAuditEvent } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications/notification-service';
 import { getSystemSetting } from '@/lib/settings/settings-service';
+import { approveBankakReceiptAtomic } from '@/lib/receipts/receipt-approval-service';
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromRequest(req);
@@ -294,27 +295,58 @@ export async function POST(req: NextRequest) {
         }
       }, { maxWait: 15000, timeout: 30000 });
 
+      // Auto-Verify & Auto-Approve non-duplicate, non-suspicious receipts with valid amount > 0
+      let finalReceipt = receipt;
+      let autoApproved = false;
+      let autoApproveError: string | null = null;
+
+      if (
+        !isDuplicate &&
+        !isSuspicious &&
+        Number(receipt.amount) > 0 &&
+        receipt.status !== 'duplicate' &&
+        receipt.status !== 'rejected'
+      ) {
+        try {
+          const approvedRes = await approveBankakReceiptAtomic({
+            receiptId: receipt.id,
+            userId: user.userId,
+            userName: user.name,
+            userRole: user.role,
+            directVerification: true,
+            allowAutoApproval: true,
+            verificationSource: 'auto_upload_approval',
+            verificationNotes: 'تم التحقق البنكي والاعتماد المالي تلقائياً عند رفع الإيصال',
+          });
+          finalReceipt = approvedRes.receipt;
+          autoApproved = true;
+        } catch (autoErr: any) {
+          autoApproveError = autoErr.message || 'تعذر الاعتماد التلقائي';
+          console.warn(`[Auto-Approve Warning] Receipt ${receipt.receiptNumber}: ${autoApproveError}`);
+        }
+      }
+
       // Append newly created receipt to in-memory existing list for in-flight duplicate checks
       existingReceipts.push({
-        id: receipt.id,
-        receiptNumber: receipt.receiptNumber,
-        transactionId: receipt.transactionId,
-        imageHash: receipt.imageHash,
-        amount: receipt.amount,
-        transactionDate: receipt.transactionDate,
-        senderName: receipt.senderName,
-        status: receipt.status,
-        customer: receipt.customer ? { name: receipt.customer.name } : null,
+        id: finalReceipt.id,
+        receiptNumber: finalReceipt.receiptNumber,
+        transactionId: finalReceipt.transactionId,
+        imageHash: finalReceipt.imageHash,
+        amount: finalReceipt.amount,
+        transactionDate: finalReceipt.transactionDate,
+        senderName: finalReceipt.senderName,
+        status: finalReceipt.status,
+        customer: finalReceipt.customer ? { name: finalReceipt.customer.name } : null,
       });
 
-      // Dispatch targeted contextual notifications
+      // Dispatch targeted contextual notifications for duplicates/suspicious/unapproved items
       if (isDuplicate) {
         await createNotification({
           type: 'duplicate_receipt',
           title: 'تحذير حاسم: اكتشاف إيصال بنكك مكرر!',
           message: riskAssessment.reason || `تم اكتشاف إيصال مكرر برقم عملية ${transactionId} بمبلغ ${amount.toLocaleString()} SDG`,
           referenceType: 'BankakReceipt',
-          referenceId: receipt.id,
+          referenceId: finalReceipt.id,
           recipientRole: 'accountant',
           priority: 'urgent',
         });
@@ -324,39 +356,28 @@ export async function POST(req: NextRequest) {
           title: 'تنبيه: إيصال مشتبه به يحتاج تدقيقاً إضافياً',
           message: riskAssessment.reason || `إيصال بمبلغ ${amount.toLocaleString()} SDG يطابق خصائص إيصال سابق`,
           referenceType: 'BankakReceipt',
-          referenceId: receipt.id,
+          referenceId: finalReceipt.id,
           recipientRole: 'accountant',
           priority: 'high',
         });
-      } else {
+      } else if (!autoApproved) {
         await createNotification({
           type: 'receipt_uploaded',
-          title: 'إيصال بنكك جديد بانتظار التحقق',
-          message: `تم رفع إيصال جديد برقم ${transactionId} بمبلغ ${amount.toLocaleString()} SDG للعميل ${receipt.customer?.name || 'عام'}`,
+          title: 'إيصال بنكك جديد بانتظار المراجعة',
+          message: `تم رفع إيصال برقم ${transactionId} بمبلغ ${amount.toLocaleString()} SDG للعميل ${finalReceipt.customer?.name || 'عام'}${autoApproveError ? ` (${autoApproveError})` : ''}`,
           referenceType: 'BankakReceipt',
-          referenceId: receipt.id,
+          referenceId: finalReceipt.id,
           recipientRole: 'accountant',
           priority: 'normal',
         });
-
-        const minOcrConfidence = await getSystemSetting<number>('ocr_min_confidence', 70);
-        if (parsed.ocrConfidence < minOcrConfidence) {
-          await createNotification({
-            type: 'pending_review',
-            title: 'دقة قراءة منخفضة للإيصال (OCR)',
-            message: `دقة استخراج الإيصال رقم ${transactionId} بلغت ${parsed.ocrConfidence}%. يتطلب مراجعة يدوية وتعديلاً قبل الاعتماد`,
-            referenceType: 'BankakReceipt',
-            referenceId: receipt.id,
-            recipientRole: 'data_entry',
-            priority: 'normal',
-          });
-        }
       }
 
       results.push({
-        ...receipt,
+        ...finalReceipt,
         isDuplicate,
         isSuspicious,
+        autoApproved,
+        autoApproveError,
         riskReason: suspicionReason,
       });
 

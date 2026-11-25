@@ -366,8 +366,8 @@ export default function ReceiptsPage() {
             if (returned) {
               allReturned.push(returned);
               if (returned.isDuplicate || returned.status === 'duplicate') dupCount++;
-              if (returned.isSuspicious || returned.status === 'suspicious') suspCount++;
-              if (returned.status === 'pending_review' || returned.ocrConfidence < 70) reviewCount++;
+              else if (returned.isSuspicious || returned.status === 'suspicious') suspCount++;
+              else if (returned.status !== 'approved' && (returned.status === 'pending_review' || returned.ocrConfidence < 70)) reviewCount++;
 
               // Mark as success
               setSelectedFiles((prev) =>
@@ -395,8 +395,9 @@ export default function ReceiptsPage() {
         }
 
         const successCount = allReturned.length;
-        const readyCount = Math.max(0, successCount - dupCount - reviewCount);
-        const summaryMsg = `تمت معالجة ${total} إيصالات: ${reviewCount > 0 ? `${reviewCount} تحتاج مراجعة` : '0 تحتاج مراجعة'}${dupCount > 0 ? `، ${dupCount} مكررة` : ''}، و${readyCount} جاهزة للتحقق`;
+        const approvedCount = allReturned.filter((r) => r.status === 'approved').length;
+        const readyCount = Math.max(0, successCount - dupCount - reviewCount - approvedCount);
+        const summaryMsg = `تمت معالجة ${total} إيصالات: تم التحقق والاعتماد التلقائي لـ (${approvedCount}) إيصال${reviewCount > 0 ? `، ${reviewCount} تحتاج مراجعة` : ''}${dupCount > 0 ? `، ${dupCount} مكررة` : ''}${readyCount > 0 ? `، ${readyCount} جاهزة` : ''}`;
 
         setPostUploadBanner({
           total,
