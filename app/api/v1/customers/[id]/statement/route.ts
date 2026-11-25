@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db';
 import { getUserFromRequest, authError } from '@/lib/auth';
 import { getSystemSettings } from '@/lib/settings/settings-service';
 import { getCustomerFinancialStatus } from '@/lib/customers/customer-balance-service';
+import { generateCustomerStatement, StatementCurrency } from '@/lib/customers/customer-statement-service';
+import { logAuditEvent } from '@/lib/audit';
 
 export async function GET(
   req: NextRequest,
@@ -32,6 +34,11 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const fromDate = searchParams.get('fromDate');
   const toDate = searchParams.get('toDate');
+  const currencyParam = (searchParams.get('currency') || 'EGP').toUpperCase();
+  const currency: StatementCurrency = currencyParam === 'SDG' ? 'SDG' : 'EGP';
+  const asOfParam = searchParams.get('asOf');
+  const asOfTimestamp = asOfParam ? new Date(asOfParam) : null;
+  const auditExport = searchParams.get('audit') === 'true';
 
   const sessionsWhere: any = {
     customerId: customer.id,
@@ -84,8 +91,35 @@ export async function GET(
     }
   }
 
-  const settings = await getSystemSettings();
-  const financialStatus = await getCustomerFinancialStatus(customer.id);
+  const [settings, financialStatus, ledgerStatement] = await Promise.all([
+    getSystemSettings(),
+    getCustomerFinancialStatus(customer.id),
+    generateCustomerStatement({
+      customerId: customer.id,
+      currency,
+      fromDate,
+      toDate,
+      asOfTimestamp: asOfTimestamp && !isNaN(asOfTimestamp.getTime()) ? asOfTimestamp : null,
+      isDataEntry,
+    }),
+  ]);
+
+  if (auditExport) {
+    await logAuditEvent({
+      userId: user.userId,
+      action: 'EXPORT_CUSTOMER_STATEMENT',
+      entityType: 'Customer',
+      entityId: customer.id,
+      newValues: {
+        currency,
+        fromDate: fromDate || 'ALL',
+        toDate: toDate || 'ALL',
+        rowsCount: ledgerStatement?.rows.length || 0,
+        closingBalance: ledgerStatement?.closingBalance || 0,
+      },
+      reason: `استخراج كشف حساب العميل ${customer.name} (${customer.customerCode}) بعملة ${currency}`,
+    });
+  }
 
   // Strict API-level RBAC: Sanitize financial data when user is data_entry
   const sanitizedSessions = sessions.map((s) => {
@@ -185,6 +219,8 @@ export async function GET(
         EGP: { debtor: 0, creditor: 0, net: 0 },
         SDG: { debtor: 0, creditor: 0, net: 0 },
       },
+      breakdown: financialStatus?.breakdown || null,
+      ledgerStatement,
       sessions: sanitizedSessions,
     },
   });

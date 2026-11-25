@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 const nextConfig = {
   reactStrictMode: true,
   experimental: {
-    serverComponentsExternalPackages: ['@prisma/client', 'bcryptjs', 'tesseract.js']
+    serverComponentsExternalPackages: ['@prisma/client', 'bcryptjs', 'tesseract.js', 'pdfkit']
   },
   webpack: (config) => {
     config.resolve.alias = {

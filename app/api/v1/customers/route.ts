@@ -30,11 +30,6 @@ export async function GET(req: NextRequest) {
   const customers = await prisma.customer.findMany({
     where: whereClause,
     include: {
-      sessions: {
-        where: { status: { not: 'cancelled' } },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-      },
       _count: {
         select: {
           sessions: true,
@@ -46,17 +41,49 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: 'desc' },
   });
 
-  // Fetch all active debts for these customers in a single batch query
+  // Fetch all active debts and ALL non-cancelled sessions for these customers in single batch queries
+  // (Prevents truncation bugs like take: 5 when calculating balances and closing eligibility)
   const customerIds = customers.map((c) => c.id);
-  const activeDebts = await prisma.debt.findMany({
-    where: {
-      status: { in: ['outstanding', 'partially_paid', 'overdue'] },
-      OR: [
-        { debtorType: 'customer', debtorId: { in: customerIds } },
-        { creditorType: 'customer', creditorId: { in: customerIds } },
-      ],
-    },
-  });
+  const [activeDebts, allSessions] = await Promise.all([
+    prisma.debt.findMany({
+      where: {
+        status: { in: ['outstanding', 'partially_paid', 'overdue'] },
+        OR: [
+          { debtorType: 'customer', debtorId: { in: customerIds } },
+          { creditorType: 'customer', creditorId: { in: customerIds } },
+        ],
+      },
+    }),
+    prisma.customerSession.findMany({
+      where: {
+        customerId: { in: customerIds },
+        status: { not: 'cancelled' },
+      },
+      select: {
+        id: true,
+        customerId: true,
+        sessionNumber: true,
+        businessDate: true,
+        status: true,
+        exchangeRate: true,
+        requestedAmount: true,
+        expectedAmount: true,
+        receivedAmount: true,
+        deliveredAmount: true,
+        overpaymentAmount: true,
+        overpaymentSettled: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ]);
+
+  const sessionsByCustomer = new Map<string, typeof allSessions>();
+  for (const s of allSessions) {
+    const list = sessionsByCustomer.get(s.customerId) || [];
+    list.push(s);
+    sessionsByCustomer.set(s.customerId, list);
+  }
 
   const enrichedCustomers = customers.map((c) => {
     let egpDebtorD = new Decimal(0);
@@ -78,14 +105,17 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2. Active Sessions
+    // 2. All Non-Cancelled Sessions (Receipt-backed EGP entitlement)
+    const custSessions = sessionsByCustomer.get(c.id) || [];
     let pendingSessionsCount = 0;
-    for (const s of c.sessions) {
+    for (const s of custSessions) {
       const isCompleted = s.status === 'completed';
       const isCancelled = s.status === 'cancelled';
       const reqEgpD = new Decimal(s.requestedAmount?.toString() || 0);
       const delEgpD = new Decimal(s.deliveredAmount?.toString() || 0);
-      const undeliveredEgpD = Decimal.max(0, reqEgpD.minus(delEgpD));
+      const recSdgD = new Decimal(s.receivedAmount?.toString() || 0);
+      const expSdgD = new Decimal(s.expectedAmount?.toString() || 0);
+      const rateD = new Decimal(s.exchangeRate?.toString() || 1);
       const overpaymentD = new Decimal(s.overpaymentAmount?.toString() || 0);
 
       if (overpaymentD.greaterThan(0) && !s.overpaymentSettled) {
@@ -94,8 +124,18 @@ export async function GET(req: NextRequest) {
 
       if (!isCompleted && !isCancelled) {
         pendingSessionsCount++;
-        if (undeliveredEgpD.greaterThan(0)) {
-          egpCreditorD = egpCreditorD.plus(undeliveredEgpD);
+        let receiptBackedEgpD = new Decimal(0);
+        if (expSdgD.greaterThan(0) && recSdgD.greaterThanOrEqualTo(expSdgD.minus(0.0001))) {
+          receiptBackedEgpD = reqEgpD;
+        } else if (recSdgD.greaterThan(0) && rateD.greaterThan(0)) {
+          receiptBackedEgpD = recSdgD.dividedBy(rateD).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+        }
+
+        const netSessionEgpD = receiptBackedEgpD.minus(delEgpD);
+        if (netSessionEgpD.greaterThan(0.0001)) {
+          egpCreditorD = egpCreditorD.plus(netSessionEgpD);
+        } else if (netSessionEgpD.lessThan(-0.0001)) {
+          egpDebtorD = egpDebtorD.plus(netSessionEgpD.abs());
         }
       }
     }
@@ -109,6 +149,7 @@ export async function GET(req: NextRequest) {
 
     return {
       ...c,
+      sessions: custSessions.slice(0, 5),
       pendingSessionsCount,
       canClose,
       balances: {

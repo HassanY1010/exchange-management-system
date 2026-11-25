@@ -64,9 +64,38 @@ export async function POST(
         throw new Error('العميل المستلم غير موجود');
       }
 
+      if (customer.status === 'closed') {
+        throw new Error(`حساب العميل (${customer.name}) مقفل حالياً. لا يمكن تسليم نقدية لحساب مقفل.`);
+      }
+
+      if (customer.status === 'blocked') {
+        throw new Error(`حساب العميل (${customer.name}) محظور في النظام.`);
+      }
+
       const employee = await tx.employee.findUnique({
         where: { id: lockedCustody.employeeId },
       });
+
+      let linkedSession: any = null;
+      if (customerSessionId) {
+        const lockedSessions = await tx.$queryRawUnsafe<any[]>(
+          'SELECT id, "customerId", "sessionNumber", "status", "requestedAmount", "expectedAmount", "receivedAmount", "deliveredAmount", "exchangeRate" FROM "CustomerSession" WHERE id = $1 FOR UPDATE',
+          customerSessionId
+        );
+        linkedSession = lockedSessions[0];
+        if (!linkedSession) {
+          throw new Error('الجلسة الحسابية المرتبطة غير موجودة');
+        }
+        if (linkedSession.customerId !== customer.id) {
+          throw new Error('الجلسة المحددة لا تتبع لهذا العميل');
+        }
+        if (linkedSession.status === 'cancelled') {
+          throw new Error('لا يمكن التسليم لجلسة حسابية ملغاة');
+        }
+        if (linkedSession.status === 'completed') {
+          throw new Error('تم صرف وتسليم هذه الجلسة بالكامل مسبقاً');
+        }
+      }
 
       // Liability clearing account: 2010 (EGP) or 2015 (SDG)
       const liabilityCode = lockedCustody.currency === 'SDG' ? '2015' : '2010';
@@ -91,7 +120,10 @@ export async function POST(
         data: { currentAmount: newCustodyBalance },
       });
 
-      // 2. Post custody transaction
+      // 2. Post custody transaction (tag referenceNumber with sessionNumber if linked so statement avoids any duplication)
+      const refNum = linkedSession
+        ? `DLV-${linkedSession.sessionNumber}-${Date.now()}`
+        : `DLV-${Date.now()}`;
       const custodyTxn = await tx.custodyTransaction.create({
         data: {
           custodyId: params.id,
@@ -99,8 +131,10 @@ export async function POST(
           amount: deliverAmount,
           currency: lockedCustody.currency,
           customerId: customer.id,
-          referenceNumber: `DLV-${Date.now()}`,
-          description: `تسليم نقدية للعميل ${customer.name} ${notes ? `(${notes})` : ''}`,
+          referenceNumber: refNum,
+          description: linkedSession
+            ? `تسليم نقدية للعميل ${customer.name} (جلسة ${linkedSession.sessionNumber})${notes ? ` (${notes})` : ''}`
+            : `تسليم نقدية للعميل ${customer.name} ${notes ? `(${notes})` : ''}`,
           createdBy: user.name,
         },
       });
@@ -132,28 +166,27 @@ export async function POST(
         ],
       });
 
-      // 4. Update Customer Session delivered total if linked
-      if (customerSessionId) {
-        const session = await tx.customerSession.findUnique({ where: { id: customerSessionId } });
-        if (session) {
-          const currentDelivered = Number(session.deliveredAmount);
-          const newDelivered = currentDelivered + deliverAmount;
-          const balanceCheck = calculateSessionBalance({
-            requestedEgpAmount: Number(session.requestedAmount),
-            exchangeRate: Number(session.exchangeRate),
-            approvedReceiptsTotalSdg: Number(session.receivedAmount),
-            deliveredEgpAmount: newDelivered,
-          });
+      // 4. Update Customer Session delivered total atomically using Decimal if linked
+      if (linkedSession) {
+        const currentDeliveredD = new Decimal(linkedSession.deliveredAmount?.toString() || '0');
+        const newDeliveredD = currentDeliveredD.plus(dDeliver);
+        const balanceCheck = calculateSessionBalance({
+          requestedEgpAmount: Number(linkedSession.requestedAmount),
+          exchangeRate: Number(linkedSession.exchangeRate),
+          approvedReceiptsTotalSdg: Number(linkedSession.receivedAmount),
+          deliveredEgpAmount: newDeliveredD.toNumber(),
+        });
 
-          await tx.customerSession.update({
-            where: { id: session.id },
-            data: {
-              deliveredAmount: newDelivered,
-              remainingAmount: balanceCheck.remainingSdgAmount,
-              status: balanceCheck.status,
-            },
-          });
-        }
+        await tx.customerSession.update({
+          where: { id: linkedSession.id },
+          data: {
+            deliveredAmount: newDeliveredD.toFixed(4),
+            remainingAmount: balanceCheck.remainingSdgAmount,
+            status: balanceCheck.status,
+            closedAt: balanceCheck.status === 'completed' ? new Date() : null,
+            closedBy: balanceCheck.status === 'completed' ? user.name : null,
+          },
+        });
       }
 
       // Record Audit Log inside the same atomic transaction

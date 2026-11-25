@@ -24,9 +24,18 @@ export interface CustomerPendingOperations {
     expectedSdg: number;
     receivedSdg: number;
     requestedEgp: number;
+    receiptBackedEgp: number;
     deliveredEgp: number;
     remainingDeliverableEgp: number;
   }[];
+}
+
+export interface CustomerFinancialBreakdown {
+  expectedEgp: number;       // إجمالي المقابل المتوقع للعمليات
+  receiptBackedEgp: number;  // المقابل المدعوم بإيصالات معتمدة فعلياً
+  earnedPayableEgp: number;  // المستحق فعلياً للعميل (المدعوم - المصروف)
+  deliveredEgp: number;      // إجمالي المبالغ المصروفة
+  remainingExpectedEgp: number; // المتبقي من إجمالي العمليات المتوقعة
 }
 
 export interface CustomerFinancialStatus {
@@ -35,6 +44,7 @@ export interface CustomerFinancialStatus {
   customerCode: string;
   status: string; // active, closed, blocked
   balances: CustomerCurrencyBalances;
+  breakdown: CustomerFinancialBreakdown;
   pendingOperations: CustomerPendingOperations;
   canClose: boolean;
   blockingReasons: string[];
@@ -99,8 +109,11 @@ export async function getCustomerFinancialStatus(
     }
   }
 
-  // B. Process Customer Sessions (Exchange operations)
+  // B. Process Customer Sessions (Exchange operations - Receipt-backed EGP entitlement)
   const pendingSessions: CustomerPendingOperations['sessions'] = [];
+  let totalExpectedEgpD = new Decimal(0);
+  let totalReceiptBackedEgpD = new Decimal(0);
+  let totalDeliveredEgpD = new Decimal(0);
 
   for (const s of customer.sessions) {
     const isCompleted = s.status === 'completed';
@@ -110,10 +123,24 @@ export async function getCustomerFinancialStatus(
     const delEgpD = new Decimal(s.deliveredAmount?.toString() || 0);
     const recSdgD = new Decimal(s.receivedAmount?.toString() || 0);
     const expSdgD = new Decimal(s.expectedAmount?.toString() || 0);
+    const rateD = new Decimal(s.exchangeRate?.toString() || 1);
     const overpaymentD = new Decimal(s.overpaymentAmount?.toString() || 0);
 
-    // If session has undelivered EGP that was paid/covered: customer is creditor for this EGP
-    const undeliveredEgpD = Decimal.max(0, reqEgpD.minus(delEgpD));
+    // Receipt-backed EGP: only approved SDG receipts create real EGP entitlement
+    let receiptBackedEgpD = new Decimal(0);
+    if (expSdgD.greaterThan(0) && recSdgD.greaterThanOrEqualTo(expSdgD.minus(0.0001))) {
+      receiptBackedEgpD = reqEgpD;
+    } else if (recSdgD.greaterThan(0) && rateD.greaterThan(0)) {
+      receiptBackedEgpD = recSdgD.dividedBy(rateD).toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+    }
+
+    if (!isCancelled) {
+      totalExpectedEgpD = totalExpectedEgpD.plus(reqEgpD);
+      totalReceiptBackedEgpD = totalReceiptBackedEgpD.plus(receiptBackedEgpD);
+      totalDeliveredEgpD = totalDeliveredEgpD.plus(delEgpD);
+    }
+
+    const undeliveredEgpD = Decimal.max(0, receiptBackedEgpD.minus(delEgpD));
 
     // Overpayment in SDG not settled: customer is creditor in SDG
     if (overpaymentD.greaterThan(0) && !s.overpaymentSettled) {
@@ -121,14 +148,13 @@ export async function getCustomerFinancialStatus(
     }
 
     if (!isCompleted && !isCancelled) {
-      // Pending delivery of EGP (Target currency obligation to customer)
-      if (undeliveredEgpD.greaterThan(0)) {
-        egpCreditorD = egpCreditorD.plus(undeliveredEgpD);
+      const netSessionEgpD = receiptBackedEgpD.minus(delEgpD);
+      if (netSessionEgpD.greaterThan(0.0001)) {
+        egpCreditorD = egpCreditorD.plus(netSessionEgpD);
+      } else if (netSessionEgpD.lessThan(-0.0001)) {
+        // Exceptional advance payout before receipts arrived -> customer owes EGP
+        egpDebtorD = egpDebtorD.plus(netSessionEgpD.abs());
       }
-
-      // Note: Approved receipts in SDG that cover requested EGP are NOT counted in SDG
-      // to eliminate duplicate counting of the exchanged amount across both currencies.
-      // Only unsettled overpayments (overpaymentAmount) represent an SDG obligation.
 
       pendingSessions.push({
         id: s.id,
@@ -138,11 +164,15 @@ export async function getCustomerFinancialStatus(
         expectedSdg: expSdgD.toNumber(),
         receivedSdg: recSdgD.toNumber(),
         requestedEgp: reqEgpD.toNumber(),
+        receiptBackedEgp: receiptBackedEgpD.toNumber(),
         deliveredEgp: delEgpD.toNumber(),
         remainingDeliverableEgp: undeliveredEgpD.toNumber(),
       });
     }
   }
+
+  const earnedPayableEgpD = Decimal.max(0, totalReceiptBackedEgpD.minus(totalDeliveredEgpD));
+  const remainingExpectedEgpD = Decimal.max(0, totalExpectedEgpD.minus(totalDeliveredEgpD));
 
   // Blocking Reasons compilation
   const blockingReasons: string[] = [];
@@ -181,6 +211,13 @@ export async function getCustomerFinancialStatus(
         creditor: sdgCreditorD.toNumber(),
         net: sdgDebtorD.minus(sdgCreditorD).toNumber(),
       },
+    },
+    breakdown: {
+      expectedEgp: totalExpectedEgpD.toNumber(),
+      receiptBackedEgp: totalReceiptBackedEgpD.toNumber(),
+      earnedPayableEgp: earnedPayableEgpD.toNumber(),
+      deliveredEgp: totalDeliveredEgpD.toNumber(),
+      remainingExpectedEgp: remainingExpectedEgpD.toNumber(),
     },
     pendingOperations: {
       count: pendingSessions.length,

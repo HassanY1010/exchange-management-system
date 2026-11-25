@@ -111,4 +111,9 @@ body {
   .print-only {
     display: block !important;
   }
+  .print-area {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
 }
