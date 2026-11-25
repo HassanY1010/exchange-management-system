@@ -62,7 +62,7 @@ export async function PATCH(
 
     const result = await prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRawUnsafe<any[]>(
-        'SELECT id, "status", "transactionId", "amount", "senderName", "receiverName", "customerId", "customerSessionId" FROM "BankakReceipt" WHERE id = $1 FOR UPDATE',
+        'SELECT id, "status", "transactionId", "amount", "senderName", "receiverName", "customerId", "customerSessionId", "ocrText" FROM "BankakReceipt" WHERE id = $1 FOR UPDATE',
         params.id
       );
 

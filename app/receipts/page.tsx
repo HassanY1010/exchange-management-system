@@ -585,8 +585,11 @@ export default function ReceiptsPage() {
       setEditTxnId(data.data.transactionId);
       setEditAmount(data.data.amount);
       setEditSender(data.data.senderName || '');
+      setEditSenderAccount(data.data.senderAccount || '');
       setEditReceiver(data.data.receiverName || '');
+      setEditReceiverAccount(data.data.receiverAccount || '');
       setEditDate(data.data.transactionDate || '');
+      setEditTime(data.data.transactionTime || '');
       setModalFeedback({ type: 'success', message: 'تمت إعادة معالجة وتدقيق الإيصال بمحرك الـ OCR بنجاح' });
       fetchReceipts();
     } catch (err: any) {
@@ -1644,7 +1647,13 @@ export default function ReceiptsPage() {
                         <Building className="w-5 h-5 text-emerald-400 shrink-0" />
                         <span className="font-bold text-xs sm:text-sm text-white">إشعار بنك الخرطوم (بنكك)</span>
                       </div>
-                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-mono font-bold">
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
+                        reviewReceipt.ocrConfidence >= 80
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : reviewReceipt.ocrConfidence >= 60
+                          ? 'bg-amber-500/20 text-amber-300'
+                          : 'bg-rose-500/20 text-rose-400'
+                      }`}>
                         ثقة OCR: {reviewReceipt.ocrConfidence}%
                       </span>
                     </div>

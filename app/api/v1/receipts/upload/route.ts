@@ -379,6 +379,8 @@ export async function POST(req: NextRequest) {
         autoApproved,
         autoApproveError,
         riskReason: suspicionReason,
+        ocrDiagnostics: ocrResult.diagnostics,
+        ocrWarnings: parsed.ocrWarnings,
       });
 
       const itemDuration = Date.now() - itemStartTime;
