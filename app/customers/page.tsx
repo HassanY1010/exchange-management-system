@@ -2147,7 +2147,9 @@ export default function CustomersPage() {
                           <tfoot className="bg-slate-100 border-t-2 border-slate-800 font-black text-xs">
                             <tr>
                               <td colSpan={2} className="p-2.5 text-slate-900">
-                                الإجمالي والرصيد الختامي ({statementCurrency})
+                                {statementData.ledgerStatement.closingBalance < 0
+                                  ? `الرصيد المطلوب من العميل (${statementCurrency})`
+                                  : `الرصيد المتبقي للعميل (${statementCurrency})`}
                               </td>
                               <td className="p-2.5 text-center font-mono text-rose-700">
                                 {Number(statementData.ledgerStatement.totalDebit || 0).toLocaleString()}

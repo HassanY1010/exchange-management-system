@@ -16,6 +16,7 @@ export function shapeArabicLine(text: string): string {
   const str = String(text).trim();
   if (!str || !ARABIC_REGEX.test(str)) return str;
 
+  // Tokenize keeping LTR words, numbers, and parenthesized/punctuated LTR runs together
   const tokens: { rtl: boolean; val: string }[] = [];
   const parts = str.split(/\s+/).filter(Boolean);
 
@@ -33,8 +34,8 @@ export function shapeArabicLine(text: string): string {
 
 /**
  * Wraps logical text to fit `maxWidth` in the current PDFKit font,
- * then shapes & BiDi-reorders each resulting visual line independently
- * so multi-line Arabic paragraphs read top-to-bottom, right-to-left.
+ * keeping LTR references/equations intact on one line when possible,
+ * and applies RTL token reordering per visual line.
  */
 function wrapAndShapeText(
   doc: PDFKit.PDFDocument,
@@ -46,6 +47,7 @@ function wrapAndShapeText(
   const visualLines: string[] = [];
 
   for (const para of paragraphs) {
+    // Group " — " or parenthesized LTR expressions gently by splitting on spaces
     const words = para.split(/\s+/).filter(Boolean);
     if (words.length === 0) {
       visualLines.push('');
@@ -55,7 +57,6 @@ function wrapAndShapeText(
     let currentLine = words[0];
     for (let i = 1; i < words.length; i++) {
       const candidate = `${currentLine} ${words[i]}`;
-      // Measure shaped candidate width accurately
       const shapedCandidate = shapeArabicLine(candidate);
       if (doc.widthOfString(shapedCandidate) <= maxWidth) {
         currentLine = candidate;
@@ -183,11 +184,11 @@ export async function buildCustomerStatementPdf(
       );
       y += 18;
 
-      // Exact Reference Title Banner: "كشف الحساب#حساب العميل [الاسم] [العملة]"
+      // Exact Reference Title Banner: "كشف الحساب # حساب العميل [الاسم] [العملة]"
       const currencyDisplay = getCurrencyDisplayName(statement.currency);
-      const bannerH = 26;
+      const bannerH = 28;
       doc.rect(marginX, y, contentWidth, bannerH).lineWidth(1).strokeColor('#000000').stroke();
-      doc.font(fontBold).fontSize(11).fillColor('#000000');
+      doc.font(fontBold).fontSize(11.5).fillColor('#000000');
       doc.text(
         shapeArabicLine(`كشف الحساب # حساب العميل ${statement.customer.name} ${currencyDisplay}`),
         marginX + 6,
@@ -195,6 +196,37 @@ export async function buildCustomerStatementPdf(
         { width: contentWidth - 12, align: 'center', lineBreak: false }
       );
       y += bannerH + 8;
+
+      // Compact Customer Info & Summary Strip (reduces empty A4 whitespace cleanly)
+      const infoH = 38;
+      doc.roundedRect(marginX, y, contentWidth, infoH, 4).fillAndStroke('#f8fafc', '#cbd5e1');
+      const halfInfoW = contentWidth / 2 - 14;
+      doc.font(fontRegular).fontSize(9).fillColor('#1f2937');
+      doc.text(
+        shapeArabicLine(`اسم العميل: ${statement.customer.name}`),
+        pageWidth - marginX - 10 - halfInfoW,
+        y + 6,
+        { width: halfInfoW, align: 'right', lineBreak: false }
+      );
+      doc.text(
+        shapeArabicLine(`رقم الهاتف: ${statement.customer.phone}`),
+        pageWidth - marginX - 10 - halfInfoW,
+        y + 21,
+        { width: halfInfoW, align: 'right', lineBreak: false }
+      );
+      doc.text(
+        shapeArabicLine(`عملة الكشف: ${currencyDisplay}`),
+        marginX + 10,
+        y + 6,
+        { width: halfInfoW, align: 'left', lineBreak: false }
+      );
+      doc.text(
+        shapeArabicLine(`رصيد بداية المدة: ${fmtMoney(statement.openingBalance)} ${statement.currency}`),
+        marginX + 10,
+        y + 21,
+        { width: halfInfoW, align: 'left', lineBreak: false }
+      );
+      y += infoH + 10;
 
       // =====================================================================
       // 2. FIVE-COLUMN RTL TABLE DEFINITION (Matching Reference Image)
@@ -224,7 +256,7 @@ export async function buildCustomerStatementPdf(
       };
 
       const drawTableHeader = (startY: number): number => {
-        const headerH = 24;
+        const headerH = 28;
         doc.rect(marginX, startY, contentWidth, headerH).fill(headerBg);
         doc.rect(marginX, startY, contentWidth, headerH).lineWidth(0.75).strokeColor(borderColor).stroke();
 
@@ -233,8 +265,8 @@ export async function buildCustomerStatementPdf(
           doc.moveTo(xPos, startY).lineTo(xPos, startY + headerH).lineWidth(0.75).strokeColor(borderColor).stroke();
         }
 
-        doc.font(fontBold).fontSize(9.5).fillColor('#000000');
-        const textY = startY + 5;
+        doc.font(fontBold).fontSize(10).fillColor('#000000');
+        const textY = startY + 6;
         doc.text(shapeArabicLine('الرصيد'), colX.balance + 4, textY, { width: colWidths.balance - 8, align: 'center', lineBreak: false });
         doc.text(shapeArabicLine('له'), colX.credit + 4, textY, { width: colWidths.credit - 8, align: 'center', lineBreak: false });
         doc.text(shapeArabicLine('عليه'), colX.debit + 4, textY, { width: colWidths.debit - 8, align: 'center', lineBreak: false });
@@ -289,10 +321,10 @@ export async function buildCustomerStatementPdf(
       } else {
         for (let idx = 0; idx < statement.rows.length; idx++) {
           const row = statement.rows[idx];
-          doc.font(fontRegular).fontSize(8.5);
-          const wrappedDetails = wrapAndShapeText(doc, row.description, colWidths.details - 14);
-          const lineHeight = 12.5;
-          const rowH = Math.max(22, wrappedDetails.length * lineHeight + 8);
+          doc.font(fontRegular).fontSize(9);
+          const wrappedDetails = wrapAndShapeText(doc, row.description, colWidths.details - 16);
+          const lineHeight = 14;
+          const rowH = Math.max(26, wrappedDetails.length * lineHeight + 10);
 
           ensurePageSpace(rowH);
 
@@ -302,36 +334,36 @@ export async function buildCustomerStatementPdf(
             doc.moveTo(xPos, y).lineTo(xPos, y + rowH).lineWidth(0.6).strokeColor(borderColor).stroke();
           }
 
-          const cellY = y + 4;
+          const cellY = y + 5;
 
-          // 1. Date (DD-MM-YYYY or YYYY-MM-DD)
-          doc.font(fontRegular).fontSize(8.5).fillColor(navy);
+          // 1. Date
+          doc.font(fontRegular).fontSize(9).fillColor(navy);
           doc.text(row.date, colX.date + 3, cellY, {
             width: colWidths.date - 6,
             align: 'center',
             lineBreak: false,
           });
 
-          // 2. Details (multi-line shaped RTL)
-          doc.font(fontRegular).fontSize(8.5).fillColor(navy);
+          // 2. Details (right-aligned per visual line for clean mixed Arabic/LTR reading)
+          doc.font(fontRegular).fontSize(9).fillColor(navy);
           wrappedDetails.forEach((visLine, lineIdx) => {
-            doc.text(visLine, colX.details + 6, cellY + lineIdx * lineHeight, {
-              width: colWidths.details - 12,
-              align: 'center',
+            doc.text(visLine, colX.details + 8, cellY + lineIdx * lineHeight, {
+              width: colWidths.details - 16,
+              align: 'right',
               lineBreak: false,
             });
           });
 
-          // 3. Debit (عليه) - empty when 0 just like reference image
-          doc.font(fontRegular).fontSize(8.5).fillColor(debitColor);
+          // 3. Debit (عليه)
+          doc.font(fontRegular).fontSize(9).fillColor(debitColor);
           doc.text(row.debit > 0 ? fmtMoney(row.debit) : '', colX.debit + 4, cellY, {
             width: colWidths.debit - 8,
             align: 'center',
             lineBreak: false,
           });
 
-          // 4. Credit (له) - empty when 0 just like reference image
-          doc.font(fontRegular).fontSize(8.5).fillColor(creditColor);
+          // 4. Credit (له)
+          doc.font(fontRegular).fontSize(9).fillColor(creditColor);
           doc.text(row.credit > 0 ? fmtMoney(row.credit) : '', colX.credit + 4, cellY, {
             width: colWidths.credit - 8,
             align: 'center',
@@ -339,7 +371,7 @@ export async function buildCustomerStatementPdf(
           });
 
           // 5. Running Balance (الرصيد)
-          doc.font(fontRegular).fontSize(8.5).fillColor(row.runningBalance < 0 ? '#b91c1c' : navy);
+          doc.font(fontBold).fontSize(9).fillColor(row.runningBalance < 0 ? '#b91c1c' : navy);
           doc.text(fmtMoney(row.runningBalance), colX.balance + 4, cellY, {
             width: colWidths.balance - 8,
             align: 'center',
@@ -353,17 +385,18 @@ export async function buildCustomerStatementPdf(
       // =====================================================================
       // 4. SUMMARY ROW 1: "اجمالي العمليات" + totalDebit + totalCredit
       // =====================================================================
-      const totalRowH = 22;
-      const finalRowH = 24;
-      ensurePageSpace(totalRowH + finalRowH + 70);
+      const totalRowH = 26;
+      const finalRowH = 28;
+      ensurePageSpace(totalRowH + finalRowH + 80);
 
-      doc.rect(marginX, y, contentWidth, totalRowH).lineWidth(0.6).strokeColor(borderColor).stroke();
+      doc.rect(marginX, y, contentWidth, totalRowH).fill('#f8fafc');
+      doc.rect(marginX, y, contentWidth, totalRowH).lineWidth(0.75).strokeColor(borderColor).stroke();
       for (const xPos of [colX.credit, colX.debit, colX.details, colX.date]) {
-        doc.moveTo(xPos, y).lineTo(xPos, y + totalRowH).lineWidth(0.6).strokeColor(borderColor).stroke();
+        doc.moveTo(xPos, y).lineTo(xPos, y + totalRowH).lineWidth(0.75).strokeColor(borderColor).stroke();
       }
 
-      const totY = y + 5;
-      doc.font(fontBold).fontSize(9).fillColor('#000000');
+      const totY = y + 6;
+      doc.font(fontBold).fontSize(9.5).fillColor('#000000');
       doc.text(shapeArabicLine('اجمالي العمليات'), colX.details + 6, totY, {
         width: colWidths.details - 12,
         align: 'center',
@@ -383,18 +416,21 @@ export async function buildCustomerStatementPdf(
       y += totalRowH;
 
       // =====================================================================
-      // 5. SUMMARY ROW 2: "الإجمالي - له" | "[closingBalance] [currencyName]"
+      // 5. SUMMARY ROW 2: Clear Closing Balance Label + Amount & Currency
       // =====================================================================
-      doc.rect(marginX, y, contentWidth, finalRowH).lineWidth(0.75).strokeColor('#000000').stroke();
-      // Single vertical split at colX.details (separating right 2 cols from left 3 cols)
-      doc.moveTo(colX.details, y).lineTo(colX.details, y + finalRowH).lineWidth(0.75).strokeColor('#000000').stroke();
+      doc.rect(marginX, y, contentWidth, finalRowH).fill('#eff6ff');
+      doc.rect(marginX, y, contentWidth, finalRowH).lineWidth(0.9).strokeColor('#000000').stroke();
+      doc.moveTo(colX.details, y).lineTo(colX.details, y + finalRowH).lineWidth(0.9).strokeColor('#000000').stroke();
 
-      const finY = y + 6;
+      const finY = y + 7;
       const rightSpanW = colWidths.details + colWidths.date;
       const leftSpanW = colWidths.balance + colWidths.credit + colWidths.debit;
 
-      doc.font(fontBold).fontSize(9.5).fillColor('#000000');
-      const netLabel = statement.closingBalance < 0 ? 'الإجمالي - عليه' : 'الإجمالي - له';
+      doc.font(fontBold).fontSize(10).fillColor('#000000');
+      const netLabel =
+        statement.closingBalance < 0
+          ? 'الرصيد المطلوب من العميل:'
+          : 'الرصيد المتبقي للعميل:';
       doc.text(shapeArabicLine(netLabel), colX.details + 4, finY, {
         width: rightSpanW - 8,
         align: 'center',
@@ -407,32 +443,38 @@ export async function buildCustomerStatementPdf(
         { width: leftSpanW - 8, align: 'center', lineBreak: false }
       );
 
-      y += finalRowH + 8;
+      y += finalRowH + 10;
 
       // Clear accounting disclosure for EGP statements (contractual rate-based entitlement vs Ledger 2015)
       if (statement.currency === 'EGP') {
-        doc.font(fontRegular).fontSize(7.5).fillColor('#4b5563');
+        doc.font(fontRegular).fontSize(8).fillColor('#4b5563');
         doc.text(
           shapeArabicLine('ملاحظة: الاستحقاق والمتبقي بعملة EGP محسوبان تعاقدياً من إيصالات SDG المعتمدة بسعر الصرف التاريخي للجلسة وليسا رصيداً مستقلاً في دفتر الأستاذ.'),
           marginX,
           y,
           { width: contentWidth, align: 'right', lineBreak: false }
         );
-        y += 16;
-      } else {
-        y += 12;
+        y += 18;
       }
 
       // =====================================================================
-      // 6. SIGNATURES & FOOTER ON ALL PAGES
+      // 6. SIGNATURES & FOOTER (Anchored cleanly toward bottom of page if space permits)
       // =====================================================================
-      doc.font(fontBold).fontSize(9).fillColor(slateMuted);
+      const sigBlockY = Math.max(y + 24, pageHeight - 115);
+      if (sigBlockY < pageHeight - 60) {
+        y = sigBlockY;
+      } else {
+        y += 20;
+      }
+
+      doc.moveTo(marginX, y - 10).lineTo(pageWidth - marginX, y - 10).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+      doc.font(fontBold).fontSize(9.5).fillColor(slateMuted);
       const sigW = contentWidth / 3;
       doc.text(shapeArabicLine('المحاسب المالي'), marginX + sigW * 2, y, { width: sigW, align: 'center', lineBreak: false });
       doc.text(shapeArabicLine('المدير العام'), marginX + sigW, y, { width: sigW, align: 'center', lineBreak: false });
       doc.text(shapeArabicLine('توقيع العميل بالاستلام'), marginX, y, { width: sigW, align: 'center', lineBreak: false });
 
-      y += 26;
+      y += 28;
       doc.strokeColor('#94a3b8').lineWidth(0.75).dash(3, { space: 2 });
       doc.moveTo(marginX + sigW * 2 + 25, y).lineTo(marginX + sigW * 3 - 25, y).stroke();
       doc.moveTo(marginX + sigW + 25, y).lineTo(marginX + sigW * 2 - 25, y).stroke();
