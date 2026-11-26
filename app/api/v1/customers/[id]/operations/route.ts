@@ -5,6 +5,7 @@ import { calculateExchange } from '@/lib/financial-core';
 import { assertBusinessDateOpen } from '@/lib/accounting/accounting-service';
 import { uploadReceiptImage, deleteReceiptImages } from '@/lib/storage/supabase-storage';
 import { logAuditEvent } from '@/lib/audit';
+import { approveBankakReceiptAtomic } from '@/lib/receipts/receipt-approval-service';
 import Decimal from 'decimal.js';
 
 interface ReceiptInput {
@@ -228,29 +229,72 @@ export async function POST(
       return { session, receipts: createdReceipts };
     });
 
-    // 3. Log Audit Event
+    // 3. Auto-Verify & Auto-Approve every created receipt with amount > 0
+    const finalReceipts = [];
+    let autoApprovedCount = 0;
+    const autoApproveErrors: Array<{ receiptId: string; receiptNumber: string; error: string }> = [];
+
+    for (const rcp of result.receipts) {
+      if (Number(rcp.amount) > 0) {
+        try {
+          const approvedRes = await approveBankakReceiptAtomic({
+            receiptId: rcp.id,
+            userId: user.userId,
+            userName: user.name,
+            userRole: user.role,
+            directVerification: true,
+            allowAutoApproval: true,
+            verificationSource: 'auto_customer_operation_approval',
+            verificationNotes: 'تم التحقق البنكي والاعتماد المالي تلقائياً عند إنشاء عملية العميل',
+          });
+          finalReceipts.push(approvedRes.receipt);
+          autoApprovedCount++;
+        } catch (autoErr: any) {
+          const errMsg = autoErr?.message || 'تعذر الاعتماد التلقائي';
+          console.warn(`[Auto-Approve Warning] Customer operation receipt ${rcp.receiptNumber}: ${errMsg}`);
+          autoApproveErrors.push({
+            receiptId: rcp.id,
+            receiptNumber: rcp.receiptNumber,
+            error: errMsg,
+          });
+          finalReceipts.push(rcp);
+        }
+      } else {
+        finalReceipts.push(rcp);
+      }
+    }
+
+    const updatedSession =
+      (await prisma.customerSession.findUnique({
+        where: { id: result.session.id },
+      })) || result.session;
+
+    // 4. Log Audit Event
     await logAuditEvent({
       userId: user.userId,
       action: 'CREATE_CUSTOMER_OPERATION',
       entityType: 'CustomerSession',
-      entityId: result.session.id,
+      entityId: updatedSession.id,
       newValues: {
-        sessionNumber: result.session.sessionNumber,
+        sessionNumber: updatedSession.sessionNumber,
         customerId,
         totalSdg: dTotalSdg.toFixed(2),
         exchangeRate: dRate.toFixed(4),
         equivalentEgp: equivalentEgpD.toFixed(2),
-        receiptsCount: result.receipts.length,
+        receiptsCount: finalReceipts.length,
+        autoApprovedCount,
       },
-      reason: `إنشاء عملية حسابية للعميل ${customer.name} بإجمالي ${dTotalSdg.toLocaleString()} SDG ومقابل ${equivalentEgpD.toLocaleString()} EGP`,
+      reason: `إنشاء عملية حسابية للعميل ${customer.name} بإجمالي ${dTotalSdg.toLocaleString()} SDG ومقابل ${equivalentEgpD.toLocaleString()} EGP (تم اعتماد ${autoApprovedCount}/${finalReceipts.length} إيصال تلقائياً)`,
     });
 
     return NextResponse.json({
       success: true,
-      message: `تم إنشاء العملية ${result.session.sessionNumber} وربط ${result.receipts.length} إيصالات بنجاح`,
+      message: `تم إنشاء العملية ${updatedSession.sessionNumber} وربط ${finalReceipts.length} إيصالات (تم التحقق والاعتماد التلقائي لـ ${autoApprovedCount} إيصال)`,
       data: {
-        session: result.session,
-        receipts: result.receipts,
+        session: updatedSession,
+        receipts: finalReceipts,
+        autoApprovedCount,
+        autoApproveErrors,
         calculated: {
           totalSdg: dTotalSdg.toNumber(),
           exchangeRate: dRate.toNumber(),
