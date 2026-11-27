@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { DashboardLayout } from '@/components/dashboard-layout';
 import * as XLSX from 'xlsx';
+import Decimal from 'decimal.js';
 import {
   Users,
   Plus,
@@ -81,12 +82,30 @@ export default function CustomersPage() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailTab, setDetailTab] = useState<'summary' | 'operations' | 'new_operation' | 'receipts'>('summary');
 
-  // New Operation Form State
-  const [opTotalSdg, setOpTotalSdg] = useState<string>('20000000');
+  // New Operation Form State (OCR-driven)
   const [opExchangeRate, setOpExchangeRate] = useState<string>('200');
-  const [opReceiptCount, setOpReceiptCount] = useState<number>(5);
   const [opNotes, setOpNotes] = useState<string>('');
-  const [opFiles, setOpFiles] = useState<{ name: string; dataUrl: string; size: number }[]>([]);
+  const [opFiles, setOpFiles] = useState<
+    Array<{
+      id: string;
+      name: string;
+      dataUrl: string;
+      size: number;
+      previewStatus: 'pending' | 'scanning' | 'done' | 'error';
+      transactionId?: string;
+      amount?: number;
+      transactionDate?: string;
+      projectedStatus?: string;
+      eligibleForAutoApprove?: boolean;
+      isDuplicate?: boolean;
+      isSuspicious?: boolean;
+      riskReason?: string | null;
+      previewToken?: string;
+      ocrConfidence?: number;
+    }>
+  >([]);
+  const [opPreviewing, setOpPreviewing] = useState<boolean>(false);
+  const [opIdempotencyKey, setOpIdempotencyKey] = useState<string>('');
   const [opSaving, setOpSaving] = useState<boolean>(false);
   const [opFeedback, setOpFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -121,13 +140,63 @@ export default function CustomersPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSubmitting, setActionSubmitting] = useState(false);
 
-  // Calculation for New Operation preview
+  // Decimal-safe OCR Batch Summary & Live EGP Calculation
+  const opSummary = useMemo(() => {
+    let extractedCount = 0;
+    let eligibleCount = 0;
+    let duplicateCount = 0;
+    let warningCount = 0;
+    let failedCount = 0;
+    let totalExtractedSdgD = new Decimal(0);
+    let eligibleTotalSdgD = new Decimal(0);
+
+    for (const f of opFiles) {
+      if (f.previewStatus === 'done') {
+        const amt = Number(f.amount || 0);
+        if (amt > 0) {
+          extractedCount++;
+          totalExtractedSdgD = totalExtractedSdgD.plus(new Decimal(amt.toString()));
+        } else {
+          failedCount++;
+        }
+        if (f.isDuplicate) {
+          duplicateCount++;
+        } else if (f.isSuspicious || f.projectedStatus === 'pending_review') {
+          warningCount++;
+        }
+        if (f.eligibleForAutoApprove) {
+          eligibleCount++;
+          eligibleTotalSdgD = eligibleTotalSdgD.plus(new Decimal(amt.toString()));
+        }
+      } else if (f.previewStatus === 'error') {
+        failedCount++;
+      }
+    }
+
+    return {
+      totalFiles: opFiles.length,
+      extractedCount,
+      eligibleCount,
+      duplicateCount,
+      warningCount,
+      failedCount,
+      totalExtractedSdg: totalExtractedSdgD.toNumber(),
+      eligibleTotalSdg: eligibleTotalSdgD.toNumber(),
+    };
+  }, [opFiles]);
+
   const calculatedEgp = useMemo(() => {
-    const sdg = parseFloat(opTotalSdg) || 0;
-    const rate = parseFloat(opExchangeRate) || 0;
-    if (sdg <= 0 || rate <= 0) return 0;
-    return Math.floor((sdg / rate) * 10000) / 10000;
-  }, [opTotalSdg, opExchangeRate]);
+    try {
+      const rateStr = (opExchangeRate || '').trim();
+      if (!rateStr || opSummary.eligibleTotalSdg <= 0) return 0;
+      const dRate = new Decimal(rateStr);
+      if (dRate.isNegative() || dRate.isZero()) return 0;
+      const dSdg = new Decimal(opSummary.eligibleTotalSdg.toString());
+      return dSdg.dividedBy(dRate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+    } catch {
+      return 0;
+    }
+  }, [opSummary.eligibleTotalSdg, opExchangeRate]);
 
   const fetchCustomers = useCallback((searchQuery: string = search) => {
     setLoading(true);
@@ -380,20 +449,88 @@ export default function CustomersPage() {
     }
   };
 
-  // Handle files upload from device
+  // Run read-only OCR preview on current batch
+  const runBatchOcrPreview = async (
+    filesList: Array<{ id: string; name: string; dataUrl: string; size: number }>
+  ) => {
+    if (filesList.length === 0) {
+      setOpFiles([]);
+      setOpIdempotencyKey('');
+      return;
+    }
+
+    setOpPreviewing(true);
+    setOpFeedback(null);
+    setOpFiles(
+      filesList.map((f) => ({
+        ...f,
+        previewStatus: 'scanning' as const,
+      }))
+    );
+
+    try {
+      const res = await fetch('/api/v1/receipts/preview-ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: detailCustomer?.id,
+          items: filesList.map((f) => ({ fileName: f.name, imageData: f.dataUrl })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'تعذر فحص الصور بواسطة OCR');
+      }
+
+      const previewItems = data.data?.items || [];
+      setOpFiles(
+        filesList.map((f, idx) => {
+          const p = previewItems[idx];
+          if (!p) {
+            return { ...f, previewStatus: 'error' as const, riskReason: 'لم ترجع نتيجة من OCR' };
+          }
+          return {
+            ...f,
+            previewStatus: 'done' as const,
+            transactionId: p.transactionId || '',
+            amount: Number(p.amount || 0),
+            transactionDate: p.transactionDate || '',
+            projectedStatus: p.projectedStatus,
+            eligibleForAutoApprove: Boolean(p.eligibleForAutoApprove),
+            isDuplicate: Boolean(p.isDuplicate),
+            isSuspicious: Boolean(p.isSuspicious),
+            riskReason: p.riskReason || null,
+            previewToken: p.previewToken || '',
+            ocrConfidence: Number(p.ocrConfidence || 0),
+          };
+        })
+      );
+      setOpIdempotencyKey(`op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+    } catch (err: any) {
+      setOpFeedback({ type: 'error', message: err?.message || 'حدث خطأ أثناء استخراج بيانات الإيصالات' });
+      setOpFiles((prev) =>
+        prev.map((f) => ({ ...f, previewStatus: 'error' as const, riskReason: 'فشل فحص OCR' }))
+      );
+    } finally {
+      setOpPreviewing(false);
+    }
+  };
+
+  // Handle files upload from device & trigger read-only OCR preview
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const newFiles: { name: string; dataUrl: string; size: number }[] = [];
+    const newFiles: Array<{ id: string; name: string; dataUrl: string; size: number }> = [];
     const readers: Promise<void>[] = [];
 
-    Array.from(files).forEach((file) => {
+    Array.from(files).forEach((file, idx) => {
       const reader = new FileReader();
       const p = new Promise<void>((resolve) => {
         reader.onload = (event) => {
           if (event.target?.result) {
             newFiles.push({
+              id: `${Date.now()}-${idx}-${file.name}`,
               name: file.name,
               dataUrl: event.target.result as string,
               size: file.size,
@@ -406,37 +543,49 @@ export default function CustomersPage() {
       readers.push(p);
     });
 
+    e.target.value = '';
     Promise.all(readers).then(() => {
-      setOpFiles((prev) => [...prev, ...newFiles]);
-      if (newFiles.length > 0 && opReceiptCount < opFiles.length + newFiles.length) {
-        setOpReceiptCount(opFiles.length + newFiles.length);
-      }
+      const combined = [
+        ...opFiles.map((f) => ({ id: f.id, name: f.name, dataUrl: f.dataUrl, size: f.size })),
+        ...newFiles,
+      ];
+      runBatchOcrPreview(combined);
     });
   };
 
   const removeFile = (index: number) => {
-    setOpFiles((prev) => prev.filter((_, i) => i !== index));
+    const remaining = opFiles
+      .filter((_, i) => i !== index)
+      .map((f) => ({ id: f.id, name: f.name, dataUrl: f.dataUrl, size: f.size }));
+    runBatchOcrPreview(remaining);
   };
 
-  // Submit New Operation with Multi Receipts
+  // Submit New Operation with OCR-Extracted Receipts (Single Commit + Idempotency)
   const handleSubmitOperation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!detailCustomer) return;
+    if (!detailCustomer || opSaving || opPreviewing) return;
 
     setOpSaving(true);
     setOpFeedback(null);
 
-    const sdg = parseFloat(opTotalSdg);
-    const rate = parseFloat(opExchangeRate);
+    let dRate: Decimal;
+    try {
+      dRate = new Decimal((opExchangeRate || '').trim());
+    } catch {
+      dRate = new Decimal(0);
+    }
 
-    if (isNaN(sdg) || sdg <= 0) {
-      setOpFeedback({ type: 'error', message: 'يرجى إدخال إجمالي مبلغ سوداني صحيح أكبر من الصفر' });
+    if (dRate.isNegative() || dRate.isZero()) {
+      setOpFeedback({ type: 'error', message: 'يرجى إدخال سعر صرف صحيح أكبر من الصفر' });
       setOpSaving(false);
       return;
     }
 
-    if (isNaN(rate) || rate <= 0) {
-      setOpFeedback({ type: 'error', message: 'يرجى إدخال سعر صرف صحيح أكبر من الصفر' });
+    if (opFiles.length === 0 || opSummary.eligibleTotalSdg <= 0) {
+      setOpFeedback({
+        type: 'error',
+        message: 'لا توجد إيصالات صالحة ومؤهلة للاعتماد لإنشاء العملية',
+      });
       setOpSaving(false);
       return;
     }
@@ -444,6 +593,7 @@ export default function CustomersPage() {
     try {
       const receiptsPayload = opFiles.map((f, idx) => ({
         imageData: f.dataUrl,
+        previewToken: f.previewToken,
         notes: `إيصال مرفوع رقم ${idx + 1} للملف: ${f.name}`,
       }));
 
@@ -451,9 +601,9 @@ export default function CustomersPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          totalSdg: sdg,
-          exchangeRate: rate,
-          receiptCount: Math.max(opReceiptCount, opFiles.length),
+          useOcr: true,
+          exchangeRate: dRate.toNumber(),
+          idempotencyKey: opIdempotencyKey || undefined,
           receipts: receiptsPayload,
           notes: opNotes.trim() || undefined,
         }),
@@ -466,12 +616,13 @@ export default function CustomersPage() {
 
       setOpFeedback({
         type: 'success',
-        message: `تم إنشاء العملية ${data.data.session.sessionNumber} بنجاح وقيمتها المقابلة: ${data.data.calculated.equivalentEgp.toLocaleString()} EGP!`,
+        message: `تم إنشاء العملية ${data.data.session.sessionNumber} واعتماد ${data.data.autoApprovedCount ?? 0} إيصال تلقائياً بمقابل ${Number(data.data.calculated.equivalentEgp).toLocaleString()} EGP!`,
       });
 
       // Clear form
       setOpFiles([]);
       setOpNotes('');
+      setOpIdempotencyKey('');
       fetchCustomerDetails(detailCustomer.id);
       fetchCustomers();
 
@@ -1143,134 +1294,204 @@ export default function CustomersPage() {
                         )}
 
                         <form onSubmit={handleSubmitOperation} className="space-y-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">
-                                إجمالي المبلغ بالسوداني (SDG) <span className="text-rose-500">*</span>
-                              </label>
-                              <input
-                                type="number"
-                                required
-                                min="1"
-                                step="any"
-                                value={opTotalSdg}
-                                onChange={(e) => setOpTotalSdg(e.target.value)}
-                                placeholder="مثال: 20000000"
-                                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">
-                                سعر الصرف (SDG لكل 1 EGP) <span className="text-rose-500">*</span>
-                              </label>
-                              <input
-                                type="number"
-                                required
-                                min="0.0001"
-                                step="any"
-                                value={opExchangeRate}
-                                onChange={(e) => setOpExchangeRate(e.target.value)}
-                                placeholder="مثال: 200"
-                                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Live Calculation Preview Callout */}
-                          <div className="p-4 bg-slate-900 text-white rounded-2xl flex items-center justify-between shadow-md">
-                            <div>
-                              <span className="text-[11px] text-slate-400 block">المعادلة والحساب التلقائي:</span>
-                              <div className="text-xs sm:text-sm font-mono text-amber-400 font-bold mt-0.5">
-                                {Number(opTotalSdg || 0).toLocaleString()} SDG ÷ {Number(opExchangeRate || 1).toLocaleString()} =
-                              </div>
-                            </div>
-                            <div className="text-left font-mono">
-                              <span className="text-[10px] text-slate-400 block">المبلغ المقابل بالجنيه المصري:</span>
-                              <span className="text-xl sm:text-2xl font-black text-emerald-400">
-                                {calculatedEgp.toLocaleString()} EGP
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">
-                                عدد الإيصالات المتوقعة
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="20"
-                                value={opReceiptCount}
-                                onChange={(e) => setOpReceiptCount(parseInt(e.target.value, 10) || 1)}
-                                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات العملية</label>
-                              <input
-                                type="text"
-                                value={opNotes}
-                                onChange={(e) => setOpNotes(e.target.value)}
-                                placeholder="مثال: تحويل عائلي، دفعة تجارية..."
-                                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-blue-500"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Image & PDF Upload Drag Box */}
+                          {/* Step 1: Upload Bankak Receipt Images */}
                           <div>
                             <label className="block text-xs font-bold text-slate-700 mb-1">
-                              صور ومستندات الإيصالات (JPG, PNG, PDF)
+                              اختيار صور إشعارات بنكك (JPG, PNG, WebP)
                             </label>
                             <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-2xl p-6 text-center bg-slate-50/50 transition-colors">
                               <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                              <p className="text-xs text-slate-600 font-bold">اسحب وأفلت صور الإيصالات هنا أو اضغط للاختيار من جهازك</p>
-                              <p className="text-[11px] text-slate-400 mt-1">يدعم رفع عدة صور معاً أو ملفات PDF مباشرة</p>
+                              <p className="text-xs text-slate-600 font-bold">
+                                اسحب وأفلت صور إشعارات بنكك هنا أو اضغط للاختيار من جهازك
+                              </p>
+                              <p className="text-[11px] text-slate-400 mt-1">
+                                يتم استخراج المبالغ وأرقام العمليات وفحص التكرار تلقائياً عبر الـ OCR
+                              </p>
                               <input
                                 type="file"
                                 multiple
-                                accept="image/jpeg,image/png,image/jpg,application/pdf"
+                                accept="image/jpeg,image/png,image/jpg,image/webp"
                                 onChange={handleFileUpload}
-                                className="mt-3 text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer"
+                                disabled={opPreviewing || opSaving || customerDetails?.status === 'closed'}
+                                className="mt-3 text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer disabled:opacity-50"
                               />
                             </div>
 
-                            {/* Files Preview Grid */}
+                            {opPreviewing && (
+                              <div className="mt-3 p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold flex items-center gap-2">
+                                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                                <span>جاري قراءة الإيصالات واستخراج المبالغ وفحص التكرار عبر OCR...</span>
+                              </div>
+                            )}
+
+                            {/* Extracted Receipts List */}
                             {opFiles.length > 0 && (
-                              <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                              <div className="mt-3 space-y-2">
                                 {opFiles.map((file, index) => (
                                   <div
-                                    key={index}
-                                    className="p-2 border border-slate-200 rounded-xl bg-white flex items-center justify-between text-xs relative group"
+                                    key={file.id}
+                                    className={`p-3 border rounded-xl bg-white flex flex-wrap items-center justify-between gap-2 text-xs ${
+                                      file.isDuplicate
+                                        ? 'border-rose-300 bg-rose-50/50'
+                                        : file.isSuspicious || file.projectedStatus === 'pending_review'
+                                        ? 'border-amber-300 bg-amber-50/50'
+                                        : file.eligibleForAutoApprove
+                                        ? 'border-emerald-200'
+                                        : 'border-slate-200'
+                                    }`}
                                   >
                                     <div className="flex items-center space-x-2 space-x-reverse min-w-0">
                                       <ImageIcon className="w-4 h-4 text-blue-600 shrink-0" />
-                                      <span className="truncate font-mono text-[11px]">{file.name}</span>
+                                      <div className="min-w-0">
+                                        <div className="font-mono text-[11px] font-bold text-slate-800 truncate">
+                                          {file.name}
+                                        </div>
+                                        {file.previewStatus === 'done' && (
+                                          <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                                            <span>
+                                              المبلغ:{' '}
+                                              <strong className="font-mono text-slate-900">
+                                                {(file.amount || 0).toLocaleString()} SDG
+                                              </strong>
+                                            </span>
+                                            <span>
+                                              رقم العملية:{' '}
+                                              <strong className="font-mono">
+                                                {file.transactionId || 'غير متوفر'}
+                                              </strong>
+                                            </span>
+                                            {file.transactionDate && (
+                                              <span>التاريخ: {file.transactionDate}</span>
+                                            )}
+                                          </div>
+                                        )}
+                                        {file.riskReason && (
+                                          <div className="text-[11px] text-rose-700 font-semibold mt-0.5">
+                                            {file.riskReason}
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeFile(index)}
-                                      className="p-1 text-rose-500 hover:text-rose-700 rounded"
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                    </button>
+
+                                    <div className="flex items-center gap-2">
+                                      {file.previewStatus === 'scanning' ? (
+                                        <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">
+                                          جاري الفحص...
+                                        </span>
+                                      ) : file.isDuplicate ? (
+                                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-bold">
+                                          مكرر (مستبعد)
+                                        </span>
+                                      ) : file.isSuspicious ? (
+                                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+                                          مشتبه به (مستبعد)
+                                        </span>
+                                      ) : file.eligibleForAutoApprove ? (
+                                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">
+                                          {file.projectedStatus === 'pending_review'
+                                            ? 'مؤهل للاعتماد (ثقة منخفضة)'
+                                            : 'صالح ومؤهل للاعتماد'}
+                                        </span>
+                                      ) : (
+                                        <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-bold">
+                                          لم يُستخرج المبلغ
+                                        </span>
+                                      )}
+
+                                      <button
+                                        type="button"
+                                        onClick={() => removeFile(index)}
+                                        disabled={opPreviewing || opSaving}
+                                        className="p-1 text-rose-500 hover:text-rose-700 rounded disabled:opacity-40"
+                                        title="إزالة الصورة"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
                             )}
                           </div>
 
+                          {/* Step 2: Auto-Extracted Summary + Single Exchange Rate Input */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs">
+                            <div>
+                              <span className="text-slate-500 block">عدد الإيصالات</span>
+                              <span className="text-base font-black text-slate-900 font-mono">
+                                {opSummary.eligibleCount} / {opSummary.totalFiles} مؤهل
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block">إجمالي المبالغ المستخرجة</span>
+                              <span className="text-base font-black text-slate-700 font-mono">
+                                {opSummary.totalExtractedSdg.toLocaleString()} SDG
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block">إجمالي المؤهل للاعتماد</span>
+                              <span className="text-base font-black text-emerald-700 font-mono">
+                                {opSummary.eligibleTotalSdg.toLocaleString()} SDG
+                              </span>
+                            </div>
+                          </div>
+
+                          {(opSummary.duplicateCount > 0 || opSummary.warningCount > 0 || opSummary.failedCount > 0) && (
+                            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                              <span>
+                                تنبيه مالي: يوجد {opSummary.duplicateCount} مكرر، {opSummary.warningCount} مشتبه/للمراجعة،{' '}
+                                {opSummary.failedCount} فشل استخراج مبلغه. لن يدخل في مستحقات العميل إلا الإيصالات المؤهلة للاعتماد فقط.
+                              </span>
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              سعر الصرف (SDG لكل 1 EGP) <span className="text-rose-500">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              required
+                              min="0.0001"
+                              step="any"
+                              value={opExchangeRate}
+                              onChange={(e) => setOpExchangeRate(e.target.value)}
+                              placeholder="مثال: 200"
+                              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+
+                          {/* Step 3: Live Decimal EGP Result */}
+                          <div className="p-4 bg-slate-900 text-white rounded-2xl flex items-center justify-between shadow-md">
+                            <div>
+                              <span className="text-[11px] text-slate-400 block">المعادلة والحساب التلقائي:</span>
+                              <div className="text-xs sm:text-sm font-mono text-amber-400 font-bold mt-0.5">
+                                {opSummary.eligibleTotalSdg.toLocaleString()} SDG ÷ {Number(opExchangeRate || 0).toLocaleString()} =
+                              </div>
+                            </div>
+                            <div className="text-left font-mono">
+                              <span className="text-[10px] text-slate-400 block">المقابل بالجنيه المصري:</span>
+                              <span className="text-xl sm:text-2xl font-black text-emerald-400">
+                                {calculatedEgp.toLocaleString()} EGP
+                              </span>
+                            </div>
+                          </div>
+
                           <div className="pt-4 flex justify-end">
                             <button
                               type="submit"
-                              disabled={opSaving || calculatedEgp <= 0 || customerDetails?.status === 'closed'}
+                              disabled={
+                                opSaving ||
+                                opPreviewing ||
+                                calculatedEgp <= 0 ||
+                                opSummary.eligibleCount === 0 ||
+                                customerDetails?.status === 'closed'
+                              }
                               className="px-6 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-blue-500/20 disabled:opacity-50 flex items-center space-x-2 space-x-reverse"
                             >
                               {opSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
-                              <span>حفظ العملية وربط {Math.max(opReceiptCount, opFiles.length)} إيصالات</span>
+                              <span>تأكيد وحفظ العملية ({opSummary.eligibleCount} إيصالات مؤهلة)</span>
                             </button>
                           </div>
                         </form>
