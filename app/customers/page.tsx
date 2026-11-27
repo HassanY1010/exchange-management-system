@@ -107,7 +107,11 @@ export default function CustomersPage() {
   const [opPreviewing, setOpPreviewing] = useState<boolean>(false);
   const [opIdempotencyKey, setOpIdempotencyKey] = useState<string>('');
   const [opSaving, setOpSaving] = useState<boolean>(false);
-  const [opFeedback, setOpFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [opFeedback, setOpFeedback] = useState<{
+    type: 'success' | 'error' | 'uncertain';
+    title: string;
+    message: string;
+  } | null>(null);
 
   // New Cash Payout (Delivery) State
   const [payoutModalOpen, setPayoutModalOpen] = useState<boolean>(false);
@@ -507,7 +511,11 @@ export default function CustomersPage() {
       );
       setOpIdempotencyKey(`op-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
     } catch (err: any) {
-      setOpFeedback({ type: 'error', message: err?.message || 'حدث خطأ أثناء استخراج بيانات الإيصالات' });
+      setOpFeedback({
+        type: 'error',
+        title: 'تعذر تحليل الإشعارات',
+        message: err?.message || 'حدث خطأ أثناء قراءة بيانات الصور، يرجى المحاولة مرة أخرى.',
+      });
       setOpFiles((prev) =>
         prev.map((f) => ({ ...f, previewStatus: 'error' as const, riskReason: 'فشل فحص OCR' }))
       );
@@ -576,7 +584,11 @@ export default function CustomersPage() {
     }
 
     if (dRate.isNegative() || dRate.isZero()) {
-      setOpFeedback({ type: 'error', message: 'يرجى إدخال سعر صرف صحيح أكبر من الصفر' });
+      setOpFeedback({
+        type: 'error',
+        title: 'سعر الصرف غير صحيح',
+        message: 'يرجى إدخال سعر صرف صحيح أكبر من الصفر.',
+      });
       setOpSaving(false);
       return;
     }
@@ -584,12 +596,14 @@ export default function CustomersPage() {
     if (opFiles.length === 0 || opSummary.eligibleTotalSdg <= 0) {
       setOpFeedback({
         type: 'error',
-        message: 'لا توجد إيصالات صالحة ومؤهلة للاعتماد لإنشاء العملية',
+        title: 'لا توجد إيصالات مؤهلة',
+        message: 'لا توجد إيصالات صالحة ومؤهلة للاعتماد لإنشاء العملية.',
       });
       setOpSaving(false);
       return;
     }
 
+    let requestSent = false;
     try {
       const receiptsPayload = opFiles.map((f, idx) => ({
         imageData: f.dataUrl,
@@ -597,6 +611,7 @@ export default function CustomersPage() {
         notes: `إيصال مرفوع رقم ${idx + 1} للملف: ${f.name}`,
       }));
 
+      requestSent = true;
       const res = await fetch(`/api/v1/customers/${detailCustomer.id}/operations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -609,17 +624,39 @@ export default function CustomersPage() {
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'فشل حفظ العملية');
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        setOpFeedback({
+          type: 'uncertain',
+          title: 'حالة الحفظ غير مؤكدة',
+          message:
+            'وصل الطلب للخادم لكن تعذر قراءة الاستجابة النهائية. قد تكون العملية قد حُفظت بالفعل؛ يرجى مراجعة تبويب «سجل العمليات» قبل إعادة المحاولة.',
+        });
+        return;
+      }
+
+      if (!res.ok || !data?.success) {
+        const safeArabicMsg =
+          typeof data?.error === 'string' && /[\u0600-\u06FF]/.test(data.error)
+            ? data.error
+            : 'تعذر إتمام حفظ العملية، يرجى مراجعة البيانات والمحاولة لاحقاً.';
+        setOpFeedback({
+          type: 'error',
+          title: 'تعذر حفظ العملية',
+          message: safeArabicMsg,
+        });
+        return;
       }
 
       setOpFeedback({
         type: 'success',
-        message: `تم إنشاء العملية ${data.data.session.sessionNumber} واعتماد ${data.data.autoApprovedCount ?? 0} إيصال تلقائياً بمقابل ${Number(data.data.calculated.equivalentEgp).toLocaleString()} EGP!`,
+        title: 'تم حفظ العملية بنجاح',
+        message: `تم تحديث بيانات العميل وحفظ العملية (${data.data.session.sessionNumber}) واعتماد ${data.data.autoApprovedCount ?? 0} إيصال تلقائياً بمقابل ${Number(data.data.calculated.equivalentEgp).toLocaleString()} EGP.`,
       });
 
-      // Clear form
+      // Clear form only on confirmed success
       setOpFiles([]);
       setOpNotes('');
       setOpIdempotencyKey('');
@@ -629,8 +666,21 @@ export default function CustomersPage() {
       setTimeout(() => {
         setDetailTab('operations');
       }, 1500);
-    } catch (err: any) {
-      setOpFeedback({ type: 'error', message: err.message || 'حدث خطأ أثناء حفظ العملية' });
+    } catch {
+      if (requestSent) {
+        setOpFeedback({
+          type: 'uncertain',
+          title: 'حالة الحفظ غير مؤكدة',
+          message:
+            'انقطع الاتصال بالخادم أثناء تنفيذ الحفظ. قد تكون العملية قد حُفظت بالفعل؛ يرجى التحقق من تبويب «سجل العمليات» أو تحديث الصفحة قبل إعادة المحاولة.',
+        });
+      } else {
+        setOpFeedback({
+          type: 'error',
+          title: 'تعذر إرسال الطلب',
+          message: 'حدث خطأ قبل إرسال الطلب، تم الاحتفاظ بالصور والبيانات المدخلة.',
+        });
+      }
     } finally {
       setOpSaving(false);
     }
@@ -1278,18 +1328,27 @@ export default function CustomersPage() {
 
                         {opFeedback && (
                           <div
-                            className={`p-3.5 rounded-xl border text-xs font-bold flex items-center space-x-2 space-x-reverse ${
+                            className={`p-4 rounded-2xl border text-xs flex items-start gap-3 ${
                               opFeedback.type === 'success'
-                                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                                : 'bg-rose-50 border-rose-200 text-rose-800'
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                : opFeedback.type === 'uncertain'
+                                ? 'bg-amber-50 border-amber-300 text-amber-950'
+                                : 'bg-rose-50 border-rose-200 text-rose-900'
                             }`}
                           >
                             {opFeedback.type === 'success' ? (
-                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                             ) : (
-                              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                              <AlertCircle
+                                className={`w-5 h-5 shrink-0 mt-0.5 ${
+                                  opFeedback.type === 'uncertain' ? 'text-amber-600' : 'text-rose-600'
+                                }`}
+                              />
                             )}
-                            <span>{opFeedback.message}</span>
+                            <div className="space-y-0.5">
+                              <div className="font-black text-sm">{opFeedback.title}</div>
+                              <p className="font-medium leading-relaxed">{opFeedback.message}</p>
+                            </div>
                           </div>
                         )}
 
@@ -1318,9 +1377,17 @@ export default function CustomersPage() {
                             </div>
 
                             {opPreviewing && (
-                              <div className="mt-3 p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold flex items-center gap-2">
-                                <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
-                                <span>جاري قراءة الإيصالات واستخراج المبالغ وفحص التكرار عبر OCR...</span>
+                              <div className="mt-3 p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 flex items-start gap-3">
+                                <RefreshCw className="w-5 h-5 animate-spin text-blue-600 shrink-0 mt-0.5" />
+                                <div className="space-y-1 text-xs">
+                                  <div className="font-black text-sm text-blue-950">جاري تحليل الإشعارات</div>
+                                  <p className="font-medium text-blue-800">
+                                    يتم الآن قراءة بيانات الحوالات من الصور، يرجى الانتظار
+                                  </p>
+                                  <div className="inline-block px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold text-[11px]">
+                                    عدد الصور الجاري تحليلها: {opFiles.length}
+                                  </div>
+                                </div>
                               </div>
                             )}
 
@@ -1457,8 +1524,9 @@ export default function CustomersPage() {
                               step="any"
                               value={opExchangeRate}
                               onChange={(e) => setOpExchangeRate(e.target.value)}
+                              disabled={opSaving || opPreviewing}
                               placeholder="مثال: 200"
-                              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:opacity-60"
                             />
                           </div>
 
@@ -1478,7 +1546,22 @@ export default function CustomersPage() {
                             </div>
                           </div>
 
-                          <div className="pt-4 flex justify-end">
+                          {opSaving && (
+                            <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-950 flex items-start gap-3">
+                              <RefreshCw className="w-5 h-5 animate-spin text-indigo-600 shrink-0 mt-0.5" />
+                              <div className="space-y-1 text-xs">
+                                <div className="font-black text-sm">جاري حفظ العملية</div>
+                                <p className="font-medium text-indigo-900">
+                                  يتم الآن رفع صور الإيصالات وتسجيل الحوالات وتحديث بيانات العميل
+                                </p>
+                                <p className="font-bold text-amber-800 bg-amber-100/80 border border-amber-200 rounded-lg px-2.5 py-1 inline-block">
+                                  يرجى عدم إغلاق الصفحة أو الضغط مرة أخرى حتى تكتمل العملية
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="pt-2 flex justify-end">
                             <button
                               type="submit"
                               disabled={
@@ -1488,10 +1571,14 @@ export default function CustomersPage() {
                                 opSummary.eligibleCount === 0 ||
                                 customerDetails?.status === 'closed'
                               }
-                              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-blue-500/20 disabled:opacity-50 flex items-center space-x-2 space-x-reverse"
+                              className="w-full sm:w-auto justify-center px-6 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md shadow-blue-500/20 disabled:opacity-50 flex items-center space-x-2 space-x-reverse"
                             >
                               {opSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
-                              <span>تأكيد وحفظ العملية ({opSummary.eligibleCount} إيصالات مؤهلة)</span>
+                              <span>
+                                {opSaving
+                                  ? 'جاري الحفظ...'
+                                  : `تأكيد وحفظ العملية (${opSummary.eligibleCount} إيصالات مؤهلة)`}
+                              </span>
                             </button>
                           </div>
                         </form>

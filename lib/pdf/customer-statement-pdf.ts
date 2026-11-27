@@ -90,6 +90,66 @@ function getStatusLabel(status: string): string {
   return 'نشط ومعتمد';
 }
 
+function getRowTypeLabel(type: string): string {
+  switch (type) {
+    case 'receipt_credit':
+      return 'إيداع إشعار بنكك معتمد';
+    case 'exchange_entitlement':
+      return 'استحقاق صرف مقابل إشعار بنكك';
+    case 'cash_payout':
+      return 'صرف نقدي (سند صرف)';
+    case 'custody_payout':
+      return 'تسليم عهدة نقدية';
+    case 'sdg_conversion':
+      return 'تسوية مقابل صرف نقدي';
+    case 'overpayment_refund':
+      return 'رد فائض سداد';
+    case 'debt_receivable':
+      return 'قيد مديونية على العميل';
+    case 'debt_payable':
+      return 'قيد استحقاق للعميل';
+    case 'debt_payment':
+      return 'سداد مديونية';
+    default:
+      return 'حركة مالية';
+  }
+}
+
+/**
+ * Draws a crisp vector official document/file icon (matching Lucide FileText)
+ * without relying on emojis or external icon fonts.
+ */
+function drawOfficialFileIcon(doc: PDFKit.PDFDocument, x: number, y: number, size = 12, color = '#1e3a8a') {
+  doc.save();
+  doc.strokeColor(color).lineWidth(1.1);
+  const fold = size * 0.32;
+  // Document outline with folded top-right corner
+  doc
+    .moveTo(x, y)
+    .lineTo(x + size - fold, y)
+    .lineTo(x + size, y + fold)
+    .lineTo(x + size, y + size * 1.2)
+    .lineTo(x, y + size * 1.2)
+    .closePath()
+    .stroke();
+  // Fold crease
+  doc
+    .moveTo(x + size - fold, y)
+    .lineTo(x + size - fold, y + fold)
+    .lineTo(x + size, y + fold)
+    .stroke();
+  // Inner text lines
+  doc
+    .moveTo(x + size * 0.22, y + size * 0.56)
+    .lineTo(x + size * 0.78, y + size * 0.56)
+    .stroke();
+  doc
+    .moveTo(x + size * 0.22, y + size * 0.82)
+    .lineTo(x + size * 0.78, y + size * 0.82)
+    .stroke();
+  doc.restore();
+}
+
 export interface PdfCompanyInfo {
   name: string;
   phone?: string;
@@ -184,16 +244,24 @@ export async function buildCustomerStatementPdf(
       );
       y += 18;
 
-      // Exact Reference Title Banner: "كشف الحساب # حساب العميل [الاسم] [العملة]"
+      // Exact Reference Title Banner with Official Brand Logo & File Icon
       const currencyDisplay = getCurrencyDisplayName(statement.currency);
-      const bannerH = 28;
+      const bannerH = 30;
       doc.rect(marginX, y, contentWidth, bannerH).lineWidth(1).strokeColor('#000000').stroke();
+      if (fs.existsSync(logoPath)) {
+        try {
+          doc.image(logoPath, pageWidth - marginX - 28, y + 4, { fit: [22, 22] });
+        } catch {
+          // Safe fallback if logo image fails to decode
+        }
+      }
+      drawOfficialFileIcon(doc, marginX + 8, y + 7, 11, '#111827');
       doc.font(fontBold).fontSize(11.5).fillColor('#000000');
       doc.text(
         shapeArabicLine(`كشف الحساب # حساب العميل ${statement.customer.name} ${currencyDisplay}`),
-        marginX + 6,
-        y + 5,
-        { width: contentWidth - 12, align: 'center', lineBreak: false }
+        marginX + 26,
+        y + 6,
+        { width: contentWidth - 58, align: 'center', lineBreak: false }
       );
       y += bannerH + 8;
 
@@ -270,7 +338,7 @@ export async function buildCustomerStatementPdf(
         doc.text(shapeArabicLine('الرصيد'), colX.balance + 4, textY, { width: colWidths.balance - 8, align: 'center', lineBreak: false });
         doc.text(shapeArabicLine('له'), colX.credit + 4, textY, { width: colWidths.credit - 8, align: 'center', lineBreak: false });
         doc.text(shapeArabicLine('عليه'), colX.debit + 4, textY, { width: colWidths.debit - 8, align: 'center', lineBreak: false });
-        doc.text(shapeArabicLine('التفاصيل'), colX.details + 6, textY, { width: colWidths.details - 12, align: 'center', lineBreak: false });
+        doc.text(shapeArabicLine('رقم العملية'), colX.details + 6, textY, { width: colWidths.details - 12, align: 'center', lineBreak: false });
         doc.text(shapeArabicLine('التاريخ'), colX.date + 4, textY, { width: colWidths.date - 8, align: 'center', lineBreak: false });
 
         return startY + headerH;
@@ -321,10 +389,8 @@ export async function buildCustomerStatementPdf(
       } else {
         for (let idx = 0; idx < statement.rows.length; idx++) {
           const row = statement.rows[idx];
-          doc.font(fontRegular).fontSize(9);
-          const wrappedDetails = wrapAndShapeText(doc, row.description, colWidths.details - 16);
-          const lineHeight = 14;
-          const rowH = Math.max(26, wrappedDetails.length * lineHeight + 10);
+          const realOpRef = row.reference && String(row.reference).trim() ? String(row.reference).trim() : '—';
+          const rowH = 26;
 
           ensurePageSpace(rowH);
 
@@ -334,7 +400,7 @@ export async function buildCustomerStatementPdf(
             doc.moveTo(xPos, y).lineTo(xPos, y + rowH).lineWidth(0.6).strokeColor(borderColor).stroke();
           }
 
-          const cellY = y + 5;
+          const cellY = y + 6;
 
           // 1. Date
           doc.font(fontRegular).fontSize(9).fillColor(navy);
@@ -344,14 +410,13 @@ export async function buildCustomerStatementPdf(
             lineBreak: false,
           });
 
-          // 2. Details (right-aligned per visual line for clean mixed Arabic/LTR reading)
-          doc.font(fontRegular).fontSize(9).fillColor(navy);
-          wrappedDetails.forEach((visLine, lineIdx) => {
-            doc.text(visLine, colX.details + 8, cellY + lineIdx * lineHeight, {
-              width: colWidths.details - 16,
-              align: 'right',
-              lineBreak: false,
-            });
+          // 2. Real Operation Number (رقم العملية) + Official File Icon
+          drawOfficialFileIcon(doc, colX.details + colWidths.details - 20, cellY + 1, 9.5, '#1e3a8a');
+          doc.font(fontBold).fontSize(9).fillColor(navy);
+          doc.text(realOpRef, colX.details + 8, cellY, {
+            width: colWidths.details - 32,
+            align: 'center',
+            lineBreak: false,
           });
 
           // 3. Debit (عليه)
@@ -458,13 +523,97 @@ export async function buildCustomerStatementPdf(
       }
 
       // =====================================================================
-      // 6. SIGNATURES & FOOTER (Anchored cleanly toward bottom of page if space permits)
+      // 6. INDEPENDENT OPERATIONS DETAILS SECTION BELOW THE TABLE
       // =====================================================================
-      const sigBlockY = Math.max(y + 24, pageHeight - 115);
+      if (statement.rows.length > 0) {
+        const drawDetailsHeader = () => {
+          const hdrH = 22;
+          doc.rect(marginX, y, contentWidth, hdrH).fill('#f1f5f9');
+          doc.rect(marginX, y, contentWidth, hdrH).lineWidth(0.75).strokeColor('#94a3b8').stroke();
+          drawOfficialFileIcon(doc, pageWidth - marginX - 20, y + 4.5, 10, '#0f172a');
+          doc.font(fontBold).fontSize(9.5).fillColor('#0f172a');
+          doc.text(
+            shapeArabicLine('تفاصيل العمليات والحركات المالية المرتبطة بأرقامها'),
+            marginX + 8,
+            y + 4,
+            { width: contentWidth - 34, align: 'right', lineBreak: false }
+          );
+          y += hdrH + 6;
+        };
+
+        const ensureDetailsSpace = (neededH: number) => {
+          if (y + neededH > pageHeight - 54) {
+            doc.addPage();
+            y = 32;
+            drawDetailsHeader();
+          }
+        };
+
+        ensureDetailsSpace(56);
+        drawDetailsHeader();
+
+        for (const row of statement.rows) {
+          const realOpRef = row.reference && String(row.reference).trim() ? String(row.reference).trim() : '—';
+          const typeLabel = getRowTypeLabel(row.type);
+          const metaParts: string[] = [
+            `رقم العملية: ${realOpRef}`,
+            `التاريخ: ${row.date}`,
+            `النوع: ${typeLabel}`,
+          ];
+          if (row.sdgAmount && row.sdgAmount > 0) {
+            metaParts.push(`المبلغ الأصلي: ${fmtMoney(row.sdgAmount)} SDG`);
+          }
+          if (row.exchangeRate && row.exchangeRate > 0) {
+            metaParts.push(`سعر الصرف: ${fmtMoney(row.exchangeRate)}`);
+          }
+          if (row.debit > 0) {
+            metaParts.push(`عليه: ${fmtMoney(row.debit)} ${row.currency}`);
+          }
+          if (row.credit > 0) {
+            metaParts.push(`له: ${fmtMoney(row.credit)} ${row.currency}`);
+          }
+          metaParts.push(`الرصيد: ${fmtMoney(row.runningBalance)} ${row.currency}`);
+
+          doc.font(fontBold).fontSize(8);
+          const metaLines = wrapAndShapeText(doc, metaParts.join(' • '), contentWidth - 28);
+          doc.font(fontRegular).fontSize(8.5);
+          const descLines = wrapAndShapeText(doc, row.description || '—', contentWidth - 28);
+
+          const cardH = metaLines.length * 12 + descLines.length * 13 + 12;
+          ensureDetailsSpace(cardH + 4);
+
+          doc.roundedRect(marginX, y, contentWidth, cardH, 3).fillAndStroke('#ffffff', '#cbd5e1');
+          drawOfficialFileIcon(doc, pageWidth - marginX - 18, y + 6, 9, '#1e3a8a');
+
+          let innerY = y + 5;
+          doc.font(fontBold).fontSize(8).fillColor('#1e293b');
+          for (const ml of metaLines) {
+            doc.text(ml, marginX + 8, innerY, { width: contentWidth - 30, align: 'right', lineBreak: false });
+            innerY += 12;
+          }
+          doc.font(fontRegular).fontSize(8.5).fillColor('#334155');
+          for (const dl of descLines) {
+            doc.text(dl, marginX + 8, innerY, { width: contentWidth - 30, align: 'right', lineBreak: false });
+            innerY += 13;
+          }
+
+          y += cardH + 5;
+        }
+        y += 6;
+      }
+
+      // =====================================================================
+      // 7. SIGNATURES & FOOTER (Prevent overlap with details section)
+      // =====================================================================
+      if (y + 72 > pageHeight - 36) {
+        doc.addPage();
+        y = 32;
+      }
+      const sigBlockY = Math.max(y + 18, pageHeight - 115);
       if (sigBlockY < pageHeight - 60) {
         y = sigBlockY;
       } else {
-        y += 20;
+        y += 16;
       }
 
       doc.moveTo(marginX, y - 10).lineTo(pageWidth - marginX, y - 10).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
